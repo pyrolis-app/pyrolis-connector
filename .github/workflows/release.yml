@@ -31,9 +31,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y unixodbc-dev xz-utils
-          curl -L https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz | tar -xJ
-          sudo mv zig-linux-x86_64-0.15.2/zig /usr/local/bin/
-          sudo mv zig-linux-x86_64-0.15.2/lib /usr/local/lib/zig
+          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
+          sudo mv zig-x86_64-linux-0.15.2/zig /usr/local/bin/
+          sudo mv zig-x86_64-linux-0.15.2/lib /usr/local/lib/zig
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -66,9 +66,9 @@ jobs:
       - name: Set up Zig
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-windows-x86_64-0.15.2.zip" -OutFile zig.zip
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.15.2/zig-x86_64-windows-0.15.2.zip" -OutFile zig.zip
           Expand-Archive -Path zig.zip -DestinationPath C:\zig
-          echo "C:\zig\zig-windows-x86_64-0.15.2" | Out-File -FilePath $env:GITHUB_PATH -Append
+          echo "C:\zig\zig-x86_64-windows-0.15.2" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
