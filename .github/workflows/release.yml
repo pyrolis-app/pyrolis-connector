@@ -30,7 +30,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unixodbc-dev
+          sudo apt-get install -y unixodbc-dev xz-utils
+          sudo snap install zig --classic --beta
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -59,6 +60,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
