@@ -45,6 +45,8 @@ jobs:
           restore-keys: linux-mix-
 
       - name: Build release
+        env:
+          BURRITO_TARGET: linux
         run: |
           mix deps.get
           mix release
@@ -86,6 +88,8 @@ jobs:
           restore-keys: windows-mix-
 
       - name: Build release
+        env:
+          BURRITO_TARGET: windows
         run: |
           mix deps.get
           mix release
