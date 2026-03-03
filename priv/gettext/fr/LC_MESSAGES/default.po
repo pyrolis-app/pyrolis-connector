@@ -479,3 +479,55 @@ msgstr "Activer les logs détaillés"
 #, elixir-autogen, elixir-format
 msgid "Switch to Normal Logging"
 msgstr "Repasser aux logs normaux"
+
+# ODBC driver detection strings
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "HFSQL ODBC driver detected"
+msgstr "Pilote ODBC HFSQL détecté"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "HFSQL ODBC driver not detected."
+msgstr "Pilote ODBC HFSQL non détecté."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Install it from your WinDev/WebDev installation media (Install/ODBC/) or"
+msgstr "Installez-le depuis votre média d'installation WinDev/WebDev (Install/ODBC/) ou"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "download from PCSoft"
+msgstr "téléchargez depuis PCSoft"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "ODBC Drivers"
+msgstr "Pilotes ODBC"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Installed Drivers"
+msgstr "Pilotes installés"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Available DSNs"
+msgstr "DSN disponibles"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No ODBC drivers found."
+msgstr "Aucun pilote ODBC trouvé."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No DSNs configured."
+msgstr "Aucun DSN configuré."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "not found"
+msgstr "non trouvé"

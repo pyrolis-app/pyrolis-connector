@@ -476,6 +476,36 @@ defmodule PyrolisConnector.Web.Router do
   end
 
   defp source_form_html(_existing) do
+    hfsql_installed = PyrolisConnector.OdbcDriver.hfsql_driver_installed?()
+    dsns = PyrolisConnector.OdbcDriver.available_dsns()
+
+    dsn_datalist =
+      if dsns != [] do
+        options = Enum.map_join(dsns, "\n", fn dsn -> "<option value=\"#{escape(dsn)}\">" end)
+        "<datalist id=\"dsn-list\">#{options}</datalist>"
+      else
+        ""
+      end
+
+    dsn_list_attr = if dsns != [], do: " list=\"dsn-list\"", else: ""
+
+    driver_alert =
+      if hfsql_installed do
+        """
+        <div style="padding: 8px 12px; background: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 12px; font-size: 13px;">
+          <strong>&#10003;</strong> #{gettext("HFSQL ODBC driver detected")}
+        </div>
+        """
+      else
+        """
+        <div style="padding: 8px 12px; background: #fff3cd; color: #856404; border-radius: 4px; margin-bottom: 12px; font-size: 13px;">
+          <strong>&#9888;</strong> #{gettext("HFSQL ODBC driver not detected.")}
+          #{gettext("Install it from your WinDev/WebDev installation media (Install/ODBC/) or")}
+          <a href="https://download.windev.com/uk/download/saas/HFSQL/2025.awp" target="_blank" style="color: #856404;">#{gettext("download from PCSoft")}</a>.
+        </div>
+        """
+      end
+
     """
     <div class="card">
       <h2>#{gettext("Add Data Source")}</h2>
@@ -494,9 +524,11 @@ defmodule PyrolisConnector.Web.Router do
         </div>
 
         <div id="odbc-fields">
+          #{driver_alert}
           <div class="form-group">
             <label>#{gettext("ODBC DSN")}</label>
-            <input type="text" name="dsn" placeholder="#{gettext("e.g. SI2A_HFSQL")}">
+            <input type="text" name="dsn" placeholder="#{gettext("e.g. SI2A_HFSQL")}"#{dsn_list_attr}>
+            #{dsn_datalist}
             <div class="help">#{gettext("Data Source Name configured in Windows ODBC Manager")}</div>
           </div>
           <div class="row">
@@ -698,6 +730,64 @@ defmodule PyrolisConnector.Web.Router do
         """
       end
 
+    # ODBC drivers card
+    drivers = PyrolisConnector.OdbcDriver.installed_drivers()
+    dsns = PyrolisConnector.OdbcDriver.available_dsns()
+    hfsql_installed = PyrolisConnector.OdbcDriver.hfsql_driver_installed?()
+
+    odbc_card =
+      """
+      <div class="card">
+        <h2>#{gettext("ODBC Drivers")}</h2>
+        <h3 style="font-size: 13px; color: #555; margin-bottom: 8px;">#{gettext("Installed Drivers")}</h3>
+      """ <>
+        if drivers == [] do
+          """
+            <div class="empty-state" style="padding: 12px;">#{gettext("No ODBC drivers found.")}</div>
+          """
+        else
+          driver_rows =
+            Enum.map_join(drivers, "\n", fn name ->
+              is_hfsql = String.contains?(String.downcase(name), "hfsql")
+              dot_class = if is_hfsql, do: "connected", else: "stopped"
+
+              """
+              <tr>
+                <td><span class="status-dot status-dot-#{dot_class}"></span>#{escape(name)}</td>
+              </tr>
+              """
+            end)
+
+          hfsql_row =
+            unless hfsql_installed do
+              """
+              <tr>
+                <td style="color: #dc3545;"><span class="status-dot status-dot-stopped"></span>HFSQL — #{gettext("not found")}</td>
+              </tr>
+              """
+            else
+              ""
+            end
+
+          "<table><tbody>#{driver_rows}#{hfsql_row}</tbody></table>"
+        end <>
+        """
+        <h3 style="font-size: 13px; color: #555; margin: 16px 0 8px;">#{gettext("Available DSNs")}</h3>
+        """ <>
+        if dsns == [] do
+          """
+            <div class="empty-state" style="padding: 12px;">#{gettext("No DSNs configured.")}</div>
+          </div>
+          """
+        else
+          dsn_rows =
+            Enum.map_join(dsns, "\n", fn name ->
+              "<tr><td class=\"mono\">#{escape(name)}</td></tr>"
+            end)
+
+          "<table><tbody>#{dsn_rows}</tbody></table></div>"
+        end
+
     # System information card
     current_log_level = Logger.level()
 
@@ -729,7 +819,7 @@ defmodule PyrolisConnector.Web.Router do
     </div>
     """
 
-    connection_card <> commands_card <> errors_card <> sources_card <> system_card
+    connection_card <> commands_card <> errors_card <> sources_card <> odbc_card <> system_card
   end
 
   defp translate_connection_status(:connected), do: gettext("connected")
