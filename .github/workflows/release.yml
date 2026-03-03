@@ -1,0 +1,153 @@
+name: Build & Release Connector
+
+on:
+  push:
+    tags:
+      - "pyrolis-connector-v*"
+
+permissions:
+  contents: write
+
+env:
+  MIX_ENV: prod
+  ELIXIR_VERSION: "1.17.3"
+  OTP_VERSION: "27.1"
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unixodbc-dev
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            pyrolis_connector/deps
+            pyrolis_connector/_build
+          key: linux-mix-${{ hashFiles('pyrolis_connector/mix.lock') }}
+          restore-keys: linux-mix-
+
+      - name: Build release
+        working-directory: pyrolis_connector
+        run: |
+          mix deps.get
+          mix release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyrolis-connector-linux-x86_64
+          path: pyrolis_connector/burrito_out/pyrolis_connector_linux
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows x86_64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            pyrolis_connector/deps
+            pyrolis_connector/_build
+          key: windows-mix-${{ hashFiles('pyrolis_connector/mix.lock') }}
+          restore-keys: windows-mix-
+
+      - name: Build release
+        working-directory: pyrolis_connector
+        run: |
+          mix deps.get
+          mix release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyrolis-connector-windows-x86_64
+          path: pyrolis_connector/burrito_out/pyrolis_connector_windows.exe
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pyrolis-connector-linux-x86_64
+          path: release/
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pyrolis-connector-windows-x86_64
+          path: release/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#pyrolis-connector-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Rename artifacts
+        run: |
+          cd release
+          mv pyrolis_connector_linux pyrolis-connector-${{ steps.version.outputs.VERSION }}-linux-x86_64 2>/dev/null || true
+          mv pyrolis_connector_windows.exe pyrolis-connector-${{ steps.version.outputs.VERSION }}-windows-x86_64.exe 2>/dev/null || true
+          chmod +x pyrolis-connector-*-linux-* 2>/dev/null || true
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Pyrolis Connector v${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Pyrolis Connector v${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+
+            **Linux:**
+            ```bash
+            chmod +x pyrolis-connector-*-linux-x86_64
+            ./pyrolis-connector-*-linux-x86_64 setup
+            ```
+
+            **Windows:**
+            Download the `.exe` file and run:
+            ```
+            pyrolis-connector-*.exe setup
+            ```
+
+            ### Checksums
+            See `SHA256SUMS.txt` for file integrity verification.
+          files: release/*
+          draft: false
+          prerelease: false
