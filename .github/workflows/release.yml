@@ -58,11 +58,18 @@ jobs:
           mix compile --force
           mix release --overwrite
 
+      - name: Download VC++ Redistributable (Windows only)
+        if: matrix.target == 'windows'
+        run: |
+          curl -L -o burrito_out/vc_redist.x64.exe https://aka.ms/vs/17/release/vc_redist.x64.exe
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pyrolis-connector-${{ matrix.target }}-x86_64
-          path: burrito_out/pyrolis_connector_${{ matrix.target }}*
+          path: |
+            burrito_out/pyrolis_connector_${{ matrix.target }}*
+            ${{ matrix.target == 'windows' && 'burrito_out/vc_redist.x64.exe' || '' }}
           if-no-files-found: error
 
   release:
@@ -117,6 +124,9 @@ jobs:
             ```
             pyrolis-connector-*.exe setup
             ```
+
+            > **Note:** Windows requires the [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (x64).
+            > If you see a `vcruntime140.dll` error, install `vc_redist.x64.exe` (included in this release) and retry.
 
             ### Checksums
             See `SHA256SUMS.txt` for file integrity verification.
