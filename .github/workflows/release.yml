@@ -45,14 +45,17 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ matrix.target }}-${{ hashFiles('mix.lock') }}
-          restore-keys: mix-${{ matrix.target }}-
+          key: mix-${{ matrix.target }}-${{ hashFiles('mix.lock') }}-${{ hashFiles('lib/**/*.ex', 'config/**/*.exs') }}
+          restore-keys: |
+            mix-${{ matrix.target }}-${{ hashFiles('mix.lock') }}-
+            mix-${{ matrix.target }}-
 
       - name: Build release
         env:
           BURRITO_TARGET: ${{ matrix.target }}
         run: |
           mix deps.get
+          mix compile --force
           mix release --overwrite
 
       - name: Upload artifact
