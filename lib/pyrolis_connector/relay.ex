@@ -192,11 +192,10 @@ defmodule PyrolisConnector.Relay do
     if socket.assigns[:config] do
       Logger.warning("Disconnected from cloud, reconnecting...")
 
-      {:ok,
-       socket
-       |> assign(:connection_status, :reconnecting)
-       |> assign(:channel_joined, false)
-       |> reconnect()}
+      socket
+      |> assign(:connection_status, :reconnecting)
+      |> assign(:channel_joined, false)
+      |> reconnect()
     else
       {:ok, socket}
     end
@@ -274,7 +273,11 @@ defmodule PyrolisConnector.Relay do
   def handle_info(:force_reconnect, socket) do
     if socket.assigns[:config] do
       Logger.info("Force reconnect requested")
-      {:noreply, socket |> assign(:connection_status, :reconnecting) |> reconnect()}
+
+      case socket |> assign(:connection_status, :reconnecting) |> reconnect() do
+        {:ok, socket} -> {:noreply, socket}
+        {:error, _} -> {:noreply, socket}
+      end
     else
       {:noreply, socket}
     end
