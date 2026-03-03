@@ -8,6 +8,13 @@ defmodule PyrolisConnector.Application do
   @impl true
   def start(_type, _args) do
     port = Application.get_env(:pyrolis_connector, :web_port, 4100)
+    cli_args = get_cli_args()
+
+    # Handle "help" before starting anything
+    if "help" in cli_args do
+      PyrolisConnector.CLI.run(["help"])
+      System.halt(0)
+    end
 
     children = [
       # Local state store (SQLite)
@@ -31,19 +38,32 @@ defmodule PyrolisConnector.Application do
     =============================================
     """)
 
-    # Auto-import config.json if present and not yet configured
-    unless PyrolisConnector.Config.configured?() do
-      case import_config_json() do
-        :ok ->
-          IO.puts("  Configuration imported from config.json\n")
+    # "setup" command → always open the setup page
+    if "setup" in cli_args do
+      IO.puts("  Opening setup in browser...\n")
+      open_browser("http://localhost:#{port}/setup")
+    else
+      # Auto-import config.json if present and not yet configured
+      unless PyrolisConnector.Config.configured?() do
+        case import_config_json() do
+          :ok ->
+            IO.puts("  Configuration imported from config.json\n")
 
-        :not_found ->
-          IO.puts("  Not configured — opening setup in browser...\n")
-          open_browser("http://localhost:#{port}/setup")
+          :not_found ->
+            IO.puts("  Not configured — opening setup in browser...\n")
+            open_browser("http://localhost:#{port}/setup")
+        end
       end
     end
 
     {:ok, sup}
+  end
+
+  defp get_cli_args do
+    case Burrito.Util.Args.get_arguments() do
+      args when is_list(args) -> Enum.map(args, &to_string/1)
+      _ -> []
+    end
   end
 
   defp import_config_json do

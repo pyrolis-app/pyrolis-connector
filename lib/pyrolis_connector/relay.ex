@@ -64,7 +64,7 @@ defmodule PyrolisConnector.Relay do
 
       {:error, :not_configured} ->
         port = Application.get_env(:pyrolis_connector, :web_port, 4100)
-        Logger.info("Connector not configured. Open http://localhost:#{port}/setup to get started.")
+        Logger.warning("Connector not configured. Open http://localhost:#{port}/setup to get started.")
         {:ok, new_socket() |> assign(:config, nil)}
     end
   end
