@@ -145,7 +145,11 @@ defmodule PyrolisConnector.State do
 
   @impl true
   def handle_call({:get_data_source, name}, _from, %{conn: conn} = state) do
-    case query_all(conn, "SELECT name, db_type, config_json, enabled FROM data_sources WHERE name = ?1", [name]) do
+    case query_all(
+           conn,
+           "SELECT name, db_type, config_json, enabled FROM data_sources WHERE name = ?1",
+           [name]
+         ) do
       [[name, db_type, config_json, enabled]] ->
         {:reply,
          {:ok,
@@ -162,7 +166,11 @@ defmodule PyrolisConnector.State do
   end
 
   @impl true
-  def handle_call({:save_data_source, name, db_type, config_map, enabled}, _from, %{conn: conn} = state) do
+  def handle_call(
+        {:save_data_source, name, db_type, config_map, enabled},
+        _from,
+        %{conn: conn} = state
+      ) do
     config_json = Jason.encode!(config_map)
 
     execute(

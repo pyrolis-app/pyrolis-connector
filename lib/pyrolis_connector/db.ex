@@ -184,7 +184,12 @@ defmodule PyrolisConnector.DB do
             case :odbc.sql_query(ref, String.to_charlist(sql)) do
               {:selected, columns, rows} ->
                 columns = Enum.map(columns, &to_string/1)
-                rows = Enum.map(rows, fn row -> Tuple.to_list(row) |> Enum.map(&decode_odbc_value/1) end)
+
+                rows =
+                  Enum.map(rows, fn row ->
+                    Tuple.to_list(row) |> Enum.map(&decode_odbc_value/1)
+                  end)
+
                 {:ok, columns, rows}
 
               {:updated, _count} ->
@@ -198,7 +203,12 @@ defmodule PyrolisConnector.DB do
             case :odbc.param_query(ref, String.to_charlist(sql), odbc_params(params)) do
               {:selected, columns, rows} ->
                 columns = Enum.map(columns, &to_string/1)
-                rows = Enum.map(rows, fn row -> Tuple.to_list(row) |> Enum.map(&decode_odbc_value/1) end)
+
+                rows =
+                  Enum.map(rows, fn row ->
+                    Tuple.to_list(row) |> Enum.map(&decode_odbc_value/1)
+                  end)
+
                 {:ok, columns, rows}
 
               {:error, reason} ->

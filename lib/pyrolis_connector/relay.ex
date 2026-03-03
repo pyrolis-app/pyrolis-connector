@@ -38,11 +38,52 @@ defmodule PyrolisConnector.Relay do
   @version Mix.Project.config()[:version]
   @heartbeat_interval_ms 30_000
   @row_batch_size 500
+  @max_recent 20
 
   # Client API
 
   def start_link(opts) do
     Slipstream.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @doc "Returns the current relay status as a map."
+  def status do
+    case Process.whereis(__MODULE__) do
+      nil ->
+        %{
+          connection_status: :stopped,
+          channel_joined: false,
+          last_heartbeat_at: nil,
+          commands_received: 0,
+          recent_commands: [],
+          recent_errors: [],
+          started_at: nil
+        }
+
+      pid ->
+        try do
+          GenServer.call(pid, :get_status, 5_000)
+        catch
+          :exit, _ ->
+            %{
+              connection_status: :stopped,
+              channel_joined: false,
+              last_heartbeat_at: nil,
+              commands_received: 0,
+              recent_commands: [],
+              recent_errors: [],
+              started_at: nil
+            }
+        end
+    end
+  end
+
+  @doc "Force the relay to reconnect to the cloud."
+  def reconnect_relay do
+    case Process.whereis(__MODULE__) do
+      nil -> {:error, :not_running}
+      pid -> send(pid, :force_reconnect) && :ok
+    end
   end
 
   # Slipstream callbacks
@@ -59,12 +100,29 @@ defmodule PyrolisConnector.Relay do
           new_socket()
           |> assign(:config, config)
           |> assign(:started_at, System.monotonic_time(:second))
+          |> assign(:connection_status, :connecting)
+          |> assign(:channel_joined, false)
+          |> assign(:last_heartbeat_at, nil)
+          |> assign(:commands_received, 0)
+          |> assign(:recent_commands, [])
+          |> assign(:recent_errors, [])
 
         {:ok, connect!(socket, uri: ws_url)}
 
       {:error, :not_configured} ->
         # Don't log a scary warning — the Application module prints the setup URL
-        {:ok, new_socket() |> assign(:config, nil)}
+        socket =
+          new_socket()
+          |> assign(:config, nil)
+          |> assign(:started_at, System.monotonic_time(:second))
+          |> assign(:connection_status, :not_configured)
+          |> assign(:channel_joined, false)
+          |> assign(:last_heartbeat_at, nil)
+          |> assign(:commands_received, 0)
+          |> assign(:recent_commands, [])
+          |> assign(:recent_errors, [])
+
+        {:ok, socket}
     end
   end
 
@@ -73,7 +131,7 @@ defmodule PyrolisConnector.Relay do
     config = socket.assigns.config
     topic = "connector:#{config.connector_id}"
     Logger.info("WebSocket connected, joining #{topic}")
-    {:ok, join(socket, topic)}
+    {:ok, socket |> assign(:connection_status, :connected) |> join(topic)}
   end
 
   @impl Slipstream
@@ -86,14 +144,29 @@ defmodule PyrolisConnector.Relay do
     # Report data source status
     send(self(), :report_status)
 
-    {:ok, socket}
+    {:ok, assign(socket, :channel_joined, true)}
   end
 
   @impl Slipstream
   def handle_message(_topic, "query", payload, socket) do
+    # Track command
+    command_entry = %{
+      request_id: payload["request_id"],
+      data_source: payload["data_source"],
+      sql: String.slice(payload["sql"] || "", 0, 120),
+      timestamp: DateTime.utc_now()
+    }
+
+    recent = Enum.take([command_entry | socket.assigns.recent_commands], @max_recent)
+    relay_pid = self()
+
     # Execute query in a Task to avoid blocking the WebSocket
-    Task.start(fn -> handle_query(payload, socket) end)
-    {:ok, socket}
+    Task.start(fn -> handle_query(payload, socket, relay_pid) end)
+
+    {:ok,
+     socket
+     |> assign(:commands_received, socket.assigns.commands_received + 1)
+     |> assign(:recent_commands, recent)}
   end
 
   @impl Slipstream
@@ -118,7 +191,12 @@ defmodule PyrolisConnector.Relay do
   def handle_disconnect(_reason, socket) do
     if socket.assigns[:config] do
       Logger.warning("Disconnected from cloud, reconnecting...")
-      {:ok, reconnect(socket)}
+
+      {:ok,
+       socket
+       |> assign(:connection_status, :reconnecting)
+       |> assign(:channel_joined, false)
+       |> reconnect()}
     else
       {:ok, socket}
     end
@@ -127,7 +205,24 @@ defmodule PyrolisConnector.Relay do
   @impl Slipstream
   def handle_topic_close(topic, reason, socket) do
     Logger.warning("Channel #{topic} closed: #{inspect(reason)}, rejoining...")
-    {:ok, rejoin(socket, topic)}
+    {:ok, socket |> assign(:channel_joined, false) |> rejoin(topic)}
+  end
+
+  # GenServer callbacks
+
+  @impl Slipstream
+  def handle_call(:get_status, _from, socket) do
+    status_map = %{
+      connection_status: socket.assigns[:connection_status] || :stopped,
+      channel_joined: socket.assigns[:channel_joined] || false,
+      last_heartbeat_at: socket.assigns[:last_heartbeat_at],
+      commands_received: socket.assigns[:commands_received] || 0,
+      recent_commands: socket.assigns[:recent_commands] || [],
+      recent_errors: socket.assigns[:recent_errors] || [],
+      started_at: socket.assigns[:started_at]
+    }
+
+    {:reply, status_map, socket}
   end
 
   # GenServer callbacks for timers
@@ -147,9 +242,11 @@ defmodule PyrolisConnector.Relay do
       })
 
       Process.send_after(self(), :heartbeat, @heartbeat_interval_ms)
-    end
 
-    {:noreply, socket}
+      {:noreply, assign(socket, :last_heartbeat_at, DateTime.utc_now())}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info(:report_status, socket) do
@@ -174,13 +271,27 @@ defmodule PyrolisConnector.Relay do
     {:noreply, socket}
   end
 
+  def handle_info(:force_reconnect, socket) do
+    if socket.assigns[:config] do
+      Logger.info("Force reconnect requested")
+      {:noreply, socket |> assign(:connection_status, :reconnecting) |> reconnect()}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:track_error, error_entry}, socket) do
+    recent = Enum.take([error_entry | socket.assigns.recent_errors], @max_recent)
+    {:noreply, assign(socket, :recent_errors, recent)}
+  end
+
   def handle_info(_msg, socket) do
     {:noreply, socket}
   end
 
   # Query execution (runs in a Task)
 
-  defp handle_query(payload, socket) do
+  defp handle_query(payload, socket, relay_pid) do
     %{
       "request_id" => request_id,
       "sql" => sql,
@@ -199,6 +310,16 @@ defmodule PyrolisConnector.Relay do
       {:error, reason} ->
         Logger.error("Query #{request_id} failed: #{reason}")
         push(socket, topic, "query_error", %{request_id: request_id, error: reason})
+
+        send(
+          relay_pid,
+          {:track_error,
+           %{
+             request_id: request_id,
+             error: to_string(reason),
+             timestamp: DateTime.utc_now()
+           }}
+        )
     end
   end
 

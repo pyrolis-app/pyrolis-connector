@@ -300,3 +300,182 @@ msgstr "en cours"
 #, elixir-autogen, elixir-format
 msgid "stopped"
 msgstr "arrêté"
+
+# New strings for dashboard connection status
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connection"
+msgstr "Connexion"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Channel Joined"
+msgstr "Canal rejoint"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Last Heartbeat"
+msgstr "Dernier battement"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Uptime"
+msgstr "Disponibilité"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Commands Received"
+msgstr "Commandes reçues"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Test Connection"
+msgstr "Tester la connexion"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connected successfully"
+msgstr "Connexion réussie"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "channel not joined"
+msgstr "canal non rejoint"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Yes"
+msgstr "Oui"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No"
+msgstr "Non"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "never"
+msgstr "jamais"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "connected"
+msgstr "connecté"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "connecting"
+msgstr "connexion en cours"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "reconnecting"
+msgstr "reconnexion en cours"
+
+# Debug page strings
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Debug"
+msgstr "Débogage"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connection Details"
+msgstr "Détails de connexion"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "WebSocket Status"
+msgstr "État WebSocket"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Cloud URL"
+msgstr "URL du cloud"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Recent Commands"
+msgstr "Commandes récentes"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No commands received yet."
+msgstr "Aucune commande reçue pour le moment."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Request ID"
+msgstr "ID de requête"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Data Source"
+msgstr "Source de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Time"
+msgstr "Heure"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Recent Errors"
+msgstr "Erreurs récentes"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No errors recorded."
+msgstr "Aucune erreur enregistrée."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Data Source Connections"
+msgstr "Connexions aux sources de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connected"
+msgstr "Connecté"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "System Information"
+msgstr "Informations système"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Version"
+msgstr "Version"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "OS"
+msgstr "SE"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Memory"
+msgstr "Mémoire"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Log Level"
+msgstr "Niveau de log"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Wall Clock"
+msgstr "Horloge système"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Enable Verbose Logging"
+msgstr "Activer les logs détaillés"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Switch to Normal Logging"
+msgstr "Repasser aux logs normaux"

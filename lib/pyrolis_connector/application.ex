@@ -7,7 +7,10 @@ defmodule PyrolisConnector.Application do
 
   @impl true
   def start(_type, _args) do
-    port = Application.get_env(:pyrolis_connector, :web_port, 4100)
+    base_port = Application.get_env(:pyrolis_connector, :web_port, 4100)
+    port = find_available_port(base_port)
+    :persistent_term.put(:pyrolis_connector_port, port)
+
     cli_args = get_cli_args()
 
     # Handle "help" before starting anything
@@ -65,11 +68,41 @@ defmodule PyrolisConnector.Application do
       """)
     end
 
+    # Always open browser — dashboard if configured, setup if not
     if setup_requested? or not configured? do
       open_browser("http://localhost:#{port}/setup")
+    else
+      open_browser("http://localhost:#{port}")
     end
 
     {:ok, sup}
+  end
+
+  defp find_available_port(base_port, attempts \\ 10)
+
+  defp find_available_port(_base_port, 0) do
+    Logger.warning("Could not find an available port after 10 attempts, using random OS port")
+    # Let the OS pick
+    {:ok, socket} = :gen_tcp.listen(0, [:binary, reuseaddr: true])
+    {:ok, {_addr, port}} = :inet.sockname(socket)
+    :gen_tcp.close(socket)
+    port
+  end
+
+  defp find_available_port(port, attempts) do
+    case :gen_tcp.listen(port, [:binary, reuseaddr: true]) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        port
+
+      {:error, :eaddrinuse} ->
+        Logger.info("Port #{port} is busy, trying #{port + 1}")
+        find_available_port(port + 1, attempts - 1)
+
+      {:error, reason} ->
+        Logger.warning("Could not probe port #{port}: #{inspect(reason)}, trying next")
+        find_available_port(port + 1, attempts - 1)
+    end
   end
 
   defp get_cli_args do
@@ -86,11 +119,12 @@ defmodule PyrolisConnector.Application do
 
   defp import_config_json do
     # Look for config.json next to the binary, or in the current directory
-    paths = [
-      config_json_path(),
-      Path.join(File.cwd!(), "config.json")
-    ]
-    |> Enum.uniq()
+    paths =
+      [
+        config_json_path(),
+        Path.join(File.cwd!(), "config.json")
+      ]
+      |> Enum.uniq()
 
     case Enum.find(paths, &File.exists?/1) do
       nil ->
@@ -99,7 +133,11 @@ defmodule PyrolisConnector.Application do
       path ->
         Logger.info("Found config.json at #{path}")
 
-        case File.read(path) |> then(fn {:ok, data} -> Jason.decode(data); e -> e end) do
+        case File.read(path)
+             |> then(fn
+               {:ok, data} -> Jason.decode(data)
+               e -> e
+             end) do
           {:ok, data} ->
             config = %PyrolisConnector.Config{
               url: data["url"],

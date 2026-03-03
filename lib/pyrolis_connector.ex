@@ -34,4 +34,9 @@ defmodule PyrolisConnector do
   @version Mix.Project.config()[:version]
 
   def version, do: @version
+
+  @doc "Returns the port the web UI is listening on."
+  def port do
+    :persistent_term.get(:pyrolis_connector_port, 4100)
+  end
 end
