@@ -30,7 +30,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y unixodbc-dev xz-utils
+          sudo apt-get install -y unixodbc-dev xz-utils p7zip-full
           curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
           sudo mv zig-x86_64-linux-0.15.2/zig /usr/local/bin/
           sudo mv zig-x86_64-linux-0.15.2/lib /usr/local/lib/zig
