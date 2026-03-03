@@ -51,7 +51,7 @@ defmodule PyrolisConnector.Relay do
   def init(_opts) do
     case PyrolisConnector.Config.load() do
       {:ok, config} ->
-        Logger.info("Connecting to #{config.cloud_url} as connector #{config.connector_id}")
+        Logger.info("Connecting to #{config.url} as connector #{config.connector_id}")
 
         ws_url = PyrolisConnector.Config.ws_url(config)
 
@@ -63,7 +63,8 @@ defmodule PyrolisConnector.Relay do
         {:ok, connect!(socket, uri: ws_url)}
 
       {:error, :not_configured} ->
-        Logger.warning("Connector not configured. Run `./pyrolis-connector setup` first.")
+        port = Application.get_env(:pyrolis_connector, :web_port, 4100)
+        Logger.info("Connector not configured. Open http://localhost:#{port}/setup to get started.")
         {:ok, new_socket() |> assign(:config, nil)}
     end
   end

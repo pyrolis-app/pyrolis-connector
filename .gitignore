@@ -31,3 +31,4 @@ pyrolis_connector-*.tar
 # IDE
 .elixir_ls/
 .vscode/
+zig-*/

@@ -46,8 +46,7 @@ defmodule PyrolisConnector.Web.Router do
 
   post "/setup" do
     config = %PyrolisConnector.Config{
-      cloud_url: String.trim(conn.params["cloud_url"]),
-      tenant: String.trim(conn.params["tenant"]),
+      url: String.trim(conn.params["url"]),
       api_key: String.trim(conn.params["api_key"]),
       connector_id: String.trim(conn.params["connector_id"])
     }
@@ -199,8 +198,7 @@ defmodule PyrolisConnector.Web.Router do
         <div class="card">
           <h2>Cloud Connection</h2>
           <table>
-            <tr><td><strong>URL</strong></td><td>#{escape(config.cloud_url)}</td></tr>
-            <tr><td><strong>Tenant</strong></td><td>#{escape(config.tenant)}</td></tr>
+            <tr><td><strong>URL</strong></td><td>#{escape(config.url)}</td></tr>
             <tr><td><strong>Connector ID</strong></td><td>#{escape(config.connector_id)}</td></tr>
             <tr><td><strong>Relay</strong></td><td><span class="status status-#{relay_status}"></span>#{relay_status}</td></tr>
           </table>
@@ -316,14 +314,9 @@ defmodule PyrolisConnector.Web.Router do
       <h2>Cloud Connection Setup</h2>
       <form method="post" action="/setup">
         <div class="form-group">
-          <label>Cloud URL</label>
-          <input type="url" name="cloud_url" value="#{escape((config && config.cloud_url) || "https://app.pyrolis.fr")}" required>
-          <div class="help">The Pyrolis cloud instance URL</div>
-        </div>
-        <div class="form-group">
-          <label>Tenant Subdomain</label>
-          <input type="text" name="tenant" value="#{escape((config && config.tenant) || "")}" required placeholder="e.g. my-company">
-          <div class="help">Your organization's subdomain</div>
+          <label>Pyrolis URL</label>
+          <input type="url" name="url" value="#{escape((config && config.url) || "")}" required placeholder="https://my-company.pyrolis.fr">
+          <div class="help">Your Pyrolis tenant URL</div>
         </div>
         <div class="form-group">
           <label>API Key</label>
