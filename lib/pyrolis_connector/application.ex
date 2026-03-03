@@ -73,9 +73,14 @@ defmodule PyrolisConnector.Application do
   end
 
   defp get_cli_args do
-    case Burrito.Util.Args.get_arguments() do
-      args when is_list(args) -> Enum.map(args, &to_string/1)
-      _ -> []
+    if Code.ensure_loaded?(Burrito.Util.Args) do
+      case Burrito.Util.Args.get_arguments() do
+        args when is_list(args) -> Enum.map(args, &to_string/1)
+        _ -> []
+      end
+    else
+      # Not running inside a Burrito binary — use System argv
+      System.argv()
     end
   end
 
@@ -123,12 +128,16 @@ defmodule PyrolisConnector.Application do
   end
 
   defp config_json_path do
-    case Burrito.Util.Args.get_bin_path() do
-      :not_in_burrito ->
-        Path.join(File.cwd!(), "config.json")
+    if Code.ensure_loaded?(Burrito.Util.Args) do
+      case Burrito.Util.Args.get_bin_path() do
+        :not_in_burrito ->
+          Path.join(File.cwd!(), "config.json")
 
-      bin_path ->
-        bin_path |> Path.dirname() |> Path.join("config.json")
+        bin_path ->
+          bin_path |> Path.dirname() |> Path.join("config.json")
+      end
+    else
+      Path.join(File.cwd!(), "config.json")
     end
   end
 
