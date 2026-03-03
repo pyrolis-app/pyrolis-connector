@@ -238,7 +238,7 @@ defmodule PyrolisConnector.State do
 
   # Helpers
 
-  defp execute(conn, sql, params \\ []) do
+  defp execute(conn, sql, params) do
     {:ok, stmt} = Exqlite.Sqlite3.prepare(conn, sql)
     :ok = Exqlite.Sqlite3.bind(stmt, params)
     :done = Exqlite.Sqlite3.step(conn, stmt)

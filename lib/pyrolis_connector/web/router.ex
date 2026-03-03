@@ -9,13 +9,41 @@ defmodule PyrolisConnector.Web.Router do
   """
 
   use Plug.Router
+  use Gettext, backend: PyrolisConnector.Gettext
 
+  plug :set_locale
   plug Plug.Parsers,
     parsers: [:urlencoded],
     pass: ["text/html"]
 
   plug :match
   plug :dispatch
+
+  # ── Locale ──
+
+  defp set_locale(conn, _opts) do
+    locale =
+      case Plug.Conn.get_req_header(conn, "accept-language") do
+        [accept | _] -> parse_locale(accept)
+        _ -> "en"
+      end
+
+    Gettext.put_locale(PyrolisConnector.Gettext, locale)
+    conn
+  end
+
+  defp parse_locale(accept_language) do
+    accept_language
+    |> String.split(",")
+    |> Enum.map(fn part ->
+      part |> String.split(";") |> hd() |> String.trim() |> String.downcase()
+    end)
+    |> Enum.find_value("en", fn
+      "fr" <> _ -> "fr"
+      "en" <> _ -> "en"
+      _ -> nil
+    end)
+  end
 
   # ── Pages ──
 
@@ -34,13 +62,13 @@ defmodule PyrolisConnector.Web.Router do
         "not configured"
       end
 
-    html = render_page("Dashboard", dashboard_html(config, sources, history, relay_status))
+    html = render_page(gettext("Dashboard"), dashboard_html(config, sources, history, relay_status))
     send_resp(conn, 200, html)
   end
 
   get "/setup" do
     config = load_config()
-    html = render_page("Setup", setup_html(config))
+    html = render_page(gettext("Setup"), setup_html(config))
     send_resp(conn, 200, html)
   end
 
@@ -59,7 +87,7 @@ defmodule PyrolisConnector.Web.Router do
   end
 
   get "/sources/new" do
-    html = render_page("Add Data Source", source_form_html(nil))
+    html = render_page(gettext("Add Data Source"), source_form_html(nil))
     send_resp(conn, 200, html)
   end
 
@@ -109,22 +137,24 @@ defmodule PyrolisConnector.Web.Router do
     result =
       case PyrolisConnector.DB.query(name, "SELECT 1") do
         {:ok, _cols, _rows} -> "OK"
-        {:error, reason} -> "Error: #{reason}"
+        {:error, reason} -> "#{gettext("Error")}: #{reason}"
       end
 
     send_resp(conn, 200, Jason.encode!(%{result: result}))
   end
 
   match _ do
-    send_resp(conn, 404, render_page("Not Found", "<p>Page not found.</p>"))
+    send_resp(conn, 404, render_page(gettext("Not Found"), "<p>#{gettext("Page not found.")}</p>"))
   end
 
   # ── HTML Templates ──
 
   defp render_page(title, body) do
+    locale = Gettext.get_locale(PyrolisConnector.Gettext)
+
     """
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="#{locale}">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -176,9 +206,9 @@ defmodule PyrolisConnector.Web.Router do
         <span class="version">v#{PyrolisConnector.version()}</span>
       </div>
       <nav>
-        <a href="/">Dashboard</a>
-        <a href="/setup">Cloud Setup</a>
-        <a href="/sources/new">Add Source</a>
+        <a href="/">#{gettext("Dashboard")}</a>
+        <a href="/setup">#{gettext("Cloud Setup")}</a>
+        <a href="/sources/new">#{gettext("Add Source")}</a>
       </nav>
       <div class="container">
         #{body}
@@ -189,26 +219,23 @@ defmodule PyrolisConnector.Web.Router do
   end
 
   defp dashboard_html(config, sources, history, relay_status) do
-    saved_alert =
-      ""
-
     cloud_section =
       if config do
         """
         <div class="card">
-          <h2>Cloud Connection</h2>
+          <h2>#{gettext("Cloud Connection")}</h2>
           <table>
             <tr><td><strong>URL</strong></td><td>#{escape(config.url)}</td></tr>
-            <tr><td><strong>Connector ID</strong></td><td>#{escape(config.connector_id)}</td></tr>
-            <tr><td><strong>Relay</strong></td><td><span class="status status-#{relay_status}"></span>#{relay_status}</td></tr>
+            <tr><td><strong>#{gettext("Connector ID")}</strong></td><td>#{escape(config.connector_id)}</td></tr>
+            <tr><td><strong>#{gettext("Relay")}</strong></td><td><span class="status status-#{relay_status}"></span>#{translate_status(relay_status)}</td></tr>
           </table>
         </div>
         """
       else
         """
         <div class="card">
-          <h2>Cloud Connection</h2>
-          <p>Not configured. <a href="/setup">Set up now</a></p>
+          <h2>#{gettext("Cloud Connection")}</h2>
+          <p>#{gettext("Not configured.")} <a href="/setup">#{gettext("Set up now")}</a></p>
         </div>
         """
       end
@@ -217,14 +244,14 @@ defmodule PyrolisConnector.Web.Router do
       if sources == [] do
         """
         <div class="card">
-          <h2>Data Sources</h2>
-          <p>No data sources configured. <a href="/sources/new">Add one</a></p>
+          <h2>#{gettext("Data Sources")}</h2>
+          <p>#{gettext("No data sources configured.")} <a href="/sources/new">#{gettext("Add one")}</a></p>
         </div>
         """
       else
         rows =
           Enum.map_join(sources, "\n", fn ds ->
-            status = if ds.enabled, do: "enabled", else: "disabled"
+            status = if ds.enabled, do: gettext("enabled"), else: gettext("disabled")
 
             """
             <tr>
@@ -232,10 +259,10 @@ defmodule PyrolisConnector.Web.Router do
               <td>#{escape(ds.db_type)}</td>
               <td>#{status}</td>
               <td class="actions">
-                <button class="btn btn-secondary btn-sm" onclick="testSource('#{escape(ds.name)}')">Test</button>
-                <form method="post" action="/sources/delete" style="display:inline" onsubmit="return confirm('Delete #{escape(ds.name)}?')">
+                <button class="btn btn-secondary btn-sm" onclick="testSource('#{escape(ds.name)}')">#{gettext("Test")}</button>
+                <form method="post" action="/sources/delete" style="display:inline" onsubmit="return confirm('#{gettext("Delete %{name}?", name: escape(ds.name))}')">
                   <input type="hidden" name="name" value="#{escape(ds.name)}">
-                  <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                  <button type="submit" class="btn btn-danger btn-sm">#{gettext("Delete")}</button>
                 </form>
               </td>
             </tr>
@@ -244,9 +271,9 @@ defmodule PyrolisConnector.Web.Router do
 
         """
         <div class="card">
-          <h2>Data Sources</h2>
+          <h2>#{gettext("Data Sources")}</h2>
           <table>
-            <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>#{gettext("Name")}</th><th>#{gettext("Type")}</th><th>#{gettext("Status")}</th><th>#{gettext("Actions")}</th></tr></thead>
             <tbody>#{rows}</tbody>
           </table>
           <div id="test-result" class="alert hidden" style="margin-top: 12px;"></div>
@@ -255,7 +282,7 @@ defmodule PyrolisConnector.Web.Router do
           async function testSource(name) {
             const el = document.getElementById('test-result');
             el.className = 'alert';
-            el.textContent = 'Testing...';
+            el.textContent = '#{gettext("Testing...")}';
             try {
               const form = new URLSearchParams();
               form.append('name', name);
@@ -269,7 +296,7 @@ defmodule PyrolisConnector.Web.Router do
               el.className = 'alert';
               el.style.background = '#f8d7da';
               el.style.color = '#721c24';
-              el.textContent = 'Connection test failed: ' + e.message;
+              el.textContent = '#{gettext("Connection test failed")}: ' + e.message;
             }
           }
         </script>
@@ -296,39 +323,39 @@ defmodule PyrolisConnector.Web.Router do
 
         """
         <div class="card">
-          <h2>Sync History</h2>
+          <h2>#{gettext("Sync History")}</h2>
           <table>
-            <thead><tr><th>Resource</th><th>Source</th><th>Synced</th><th>Errors</th><th>Status</th><th>Started</th></tr></thead>
+            <thead><tr><th>#{gettext("Resource")}</th><th>#{gettext("Source")}</th><th>#{gettext("Synced")}</th><th>#{gettext("Errors")}</th><th>#{gettext("Status")}</th><th>#{gettext("Started")}</th></tr></thead>
             <tbody>#{rows}</tbody>
           </table>
         </div>
         """
       end
 
-    saved_alert <> cloud_section <> sources_section <> history_section
+    cloud_section <> sources_section <> history_section
   end
 
   defp setup_html(config) do
     """
     <div class="card">
-      <h2>Cloud Connection Setup</h2>
+      <h2>#{gettext("Cloud Connection Setup")}</h2>
       <form method="post" action="/setup">
         <div class="form-group">
-          <label>Pyrolis URL</label>
+          <label>#{gettext("Pyrolis URL")}</label>
           <input type="url" name="url" value="#{escape((config && config.url) || "")}" required placeholder="https://my-company.pyrolis.fr">
-          <div class="help">Your Pyrolis tenant URL</div>
+          <div class="help">#{gettext("Your Pyrolis tenant URL")}</div>
         </div>
         <div class="form-group">
-          <label>API Key</label>
+          <label>#{gettext("API Key")}</label>
           <input type="password" name="api_key" value="#{escape((config && config.api_key) || "")}" required placeholder="pyrk_...">
-          <div class="help">Generated in Pyrolis Admin > Integrations > Connectors</div>
+          <div class="help">#{gettext("Generated in Pyrolis Admin > Integrations > Connectors")}</div>
         </div>
         <div class="form-group">
-          <label>Connector ID</label>
-          <input type="text" name="connector_id" value="#{escape((config && config.connector_id) || "")}" required placeholder="e.g. paris-office-01">
-          <div class="help">Unique identifier for this connector instance</div>
+          <label>#{gettext("Connector ID")}</label>
+          <input type="text" name="connector_id" value="#{escape((config && config.connector_id) || "")}" required placeholder="#{gettext("e.g. paris-office-01")}">
+          <div class="help">#{gettext("Unique identifier for this connector instance")}</div>
         </div>
-        <button type="submit" class="btn btn-primary">Save Configuration</button>
+        <button type="submit" class="btn btn-primary">#{gettext("Save Configuration")}</button>
       </form>
     </div>
     """
@@ -337,15 +364,15 @@ defmodule PyrolisConnector.Web.Router do
   defp source_form_html(_existing) do
     """
     <div class="card">
-      <h2>Add Data Source</h2>
+      <h2>#{gettext("Add Data Source")}</h2>
       <form method="post" action="/sources">
         <div class="form-group">
-          <label>Name</label>
-          <input type="text" name="name" required placeholder="e.g. si2a, cmms, erp">
-          <div class="help">Unique name for this data source</div>
+          <label>#{gettext("Name")}</label>
+          <input type="text" name="name" required placeholder="#{gettext("e.g. si2a, cmms, erp")}">
+          <div class="help">#{gettext("Unique name for this data source")}</div>
         </div>
         <div class="form-group">
-          <label>Database Type</label>
+          <label>#{gettext("Database Type")}</label>
           <select name="db_type" id="db_type" onchange="toggleFields()" required>
             <option value="odbc">ODBC (HFSQL, SQL Server, etc.)</option>
             <option value="mysql">MySQL / MariaDB</option>
@@ -354,18 +381,18 @@ defmodule PyrolisConnector.Web.Router do
 
         <div id="odbc-fields">
           <div class="form-group">
-            <label>ODBC DSN</label>
-            <input type="text" name="dsn" placeholder="e.g. SI2A_HFSQL">
-            <div class="help">Data Source Name configured in Windows ODBC Manager</div>
+            <label>#{gettext("ODBC DSN")}</label>
+            <input type="text" name="dsn" placeholder="#{gettext("e.g. SI2A_HFSQL")}">
+            <div class="help">#{gettext("Data Source Name configured in Windows ODBC Manager")}</div>
           </div>
           <div class="row">
             <div class="form-group">
-              <label>Username</label>
-              <input type="text" name="uid" placeholder="Optional">
+              <label>#{gettext("Username")}</label>
+              <input type="text" name="uid" placeholder="#{gettext("Optional")}">
             </div>
             <div class="form-group">
-              <label>Password</label>
-              <input type="password" name="pwd" placeholder="Optional">
+              <label>#{gettext("Password")}</label>
+              <input type="password" name="pwd" placeholder="#{gettext("Optional")}">
             </div>
           </div>
         </div>
@@ -373,32 +400,32 @@ defmodule PyrolisConnector.Web.Router do
         <div id="mysql-fields" class="hidden">
           <div class="row">
             <div class="form-group">
-              <label>Host</label>
+              <label>#{gettext("Host")}</label>
               <input type="text" name="host" value="localhost">
             </div>
             <div class="form-group">
-              <label>Port</label>
+              <label>#{gettext("Port")}</label>
               <input type="number" name="port" value="3306">
             </div>
           </div>
           <div class="form-group">
-            <label>Database</label>
-            <input type="text" name="database" placeholder="e.g. cmms_db">
+            <label>#{gettext("Database")}</label>
+            <input type="text" name="database" placeholder="#{gettext("e.g. cmms_db")}">
           </div>
           <div class="row">
             <div class="form-group">
-              <label>Username</label>
+              <label>#{gettext("Username")}</label>
               <input type="text" name="username" value="root">
             </div>
             <div class="form-group">
-              <label>Password</label>
+              <label>#{gettext("Password")}</label>
               <input type="password" name="password">
             </div>
           </div>
         </div>
 
-        <button type="submit" class="btn btn-primary">Add Data Source</button>
-        <a href="/" class="btn btn-secondary" style="text-decoration: none; margin-left: 8px;">Cancel</a>
+        <button type="submit" class="btn btn-primary">#{gettext("Add Data Source")}</button>
+        <a href="/" class="btn btn-secondary" style="text-decoration: none; margin-left: 8px;">#{gettext("Cancel")}</a>
       </form>
     </div>
 
@@ -411,6 +438,11 @@ defmodule PyrolisConnector.Web.Router do
     </script>
     """
   end
+
+  defp translate_status("running"), do: gettext("running")
+  defp translate_status("stopped"), do: gettext("stopped")
+  defp translate_status("not configured"), do: gettext("not configured")
+  defp translate_status(other), do: other
 
   # ── Helpers ──
 

@@ -1,0 +1,302 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n>1);\n"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "API Key"
+msgstr "Clé API"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr "Actions"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Add Data Source"
+msgstr "Ajouter une source de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Add Source"
+msgstr "Ajouter une source"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Add one"
+msgstr "En ajouter une"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Cancel"
+msgstr "Annuler"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Cloud Connection"
+msgstr "Connexion au cloud"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Cloud Connection Setup"
+msgstr "Configuration de la connexion cloud"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Cloud Setup"
+msgstr "Connexion cloud"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connection test failed"
+msgstr "Échec du test de connexion"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Connector ID"
+msgstr "Identifiant du connecteur"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Dashboard"
+msgstr "Tableau de bord"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Data Source Name configured in Windows ODBC Manager"
+msgstr "Nom de source de données configuré dans le Gestionnaire ODBC de Windows"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Data Sources"
+msgstr "Sources de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Database"
+msgstr "Base de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Database Type"
+msgstr "Type de base de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Delete"
+msgstr "Supprimer"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Delete %{name}?"
+msgstr "Supprimer %{name} ?"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Error"
+msgstr "Erreur"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Errors"
+msgstr "Erreurs"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Generated in Pyrolis Admin > Integrations > Connectors"
+msgstr "Générée dans Pyrolis Admin > Intégrations > Connecteurs"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Host"
+msgstr "Hôte"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Name"
+msgstr "Nom"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "No data sources configured."
+msgstr "Aucune source de données configurée."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Not Found"
+msgstr "Non trouvé"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Not configured."
+msgstr "Non configuré."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "ODBC DSN"
+msgstr "DSN ODBC"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Optional"
+msgstr "Facultatif"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Page not found."
+msgstr "Page non trouvée."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Password"
+msgstr "Mot de passe"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Port"
+msgstr "Port"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Pyrolis URL"
+msgstr "URL Pyrolis"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Relay"
+msgstr "Relais"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Resource"
+msgstr "Ressource"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Save Configuration"
+msgstr "Enregistrer la configuration"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Set up now"
+msgstr "Configurer maintenant"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Setup"
+msgstr "Configuration"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Source"
+msgstr "Source"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Started"
+msgstr "Démarré"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Status"
+msgstr "Statut"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Sync History"
+msgstr "Historique de synchronisation"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Synced"
+msgstr "Synchronisés"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Test"
+msgstr "Tester"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Testing..."
+msgstr "Test en cours..."
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Type"
+msgstr "Type"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Unique identifier for this connector instance"
+msgstr "Identifiant unique de cette instance du connecteur"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Unique name for this data source"
+msgstr "Nom unique pour cette source de données"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Username"
+msgstr "Nom d'utilisateur"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "Your Pyrolis tenant URL"
+msgstr "L'URL de votre espace Pyrolis"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "disabled"
+msgstr "désactivé"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. SI2A_HFSQL"
+msgstr "ex. SI2A_HFSQL"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. cmms_db"
+msgstr "ex. cmms_db"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. paris-office-01"
+msgstr "ex. bureau-paris-01"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "e.g. si2a, cmms, erp"
+msgstr "ex. si2a, gmao, erp"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "enabled"
+msgstr "activé"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "not configured"
+msgstr "non configuré"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "running"
+msgstr "en cours"
+
+#: lib/pyrolis_connector/web/router.ex
+#, elixir-autogen, elixir-format
+msgid "stopped"
+msgstr "arrêté"

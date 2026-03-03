@@ -27,6 +27,8 @@ defmodule PyrolisConnector.MixProject do
       {:req, "~> 0.5"},
       # JSON
       {:jason, "~> 1.4"},
+      # i18n
+      {:gettext, "~> 0.26"},
       # SQLite for local state
       {:exqlite, "~> 0.27"},
       # Local web UI for setup/management
