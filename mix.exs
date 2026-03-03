@@ -29,6 +29,9 @@ defmodule PyrolisConnector.MixProject do
       {:jason, "~> 1.4"},
       # SQLite for local state
       {:exqlite, "~> 0.27"},
+      # Local web UI for setup/management
+      {:plug, "~> 1.16"},
+      {:bandit, "~> 1.6"},
       # DB drivers (optional — include what you need)
       {:myxql, "~> 0.7", optional: true},
       # Packaging
