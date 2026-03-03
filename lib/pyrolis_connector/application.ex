@@ -30,30 +30,43 @@ defmodule PyrolisConnector.Application do
     opts = [strategy: :one_for_one, name: PyrolisConnector.Supervisor]
     {:ok, sup} = Supervisor.start_link(children, opts)
 
-    IO.puts("""
+    setup_requested? = "setup" in cli_args
 
-    =============================================
-      Pyrolis Connector v#{PyrolisConnector.version()}
-      Web UI: http://localhost:#{port}
-    =============================================
-    """)
-
-    # "setup" command → always open the setup page
-    if "setup" in cli_args do
-      IO.puts("  Opening setup in browser...\n")
-      open_browser("http://localhost:#{port}/setup")
-    else
-      # Auto-import config.json if present and not yet configured
-      unless PyrolisConnector.Config.configured?() do
-        case import_config_json() do
-          :ok ->
-            IO.puts("  Configuration imported from config.json\n")
-
-          :not_found ->
-            IO.puts("  Not configured — opening setup in browser...\n")
-            open_browser("http://localhost:#{port}/setup")
+    # Auto-import config.json if present and not yet configured
+    configured? =
+      if PyrolisConnector.Config.configured?() do
+        true
+      else
+        if not setup_requested? and import_config_json() == :ok do
+          true
+        else
+          false
         end
       end
+
+    if configured? do
+      IO.puts("""
+
+      =============================================
+        Pyrolis Connector v#{PyrolisConnector.version()}
+        Status: Connected
+        Web UI: http://localhost:#{port}
+      =============================================
+      """)
+    else
+      IO.puts("""
+
+      =============================================
+        Pyrolis Connector v#{PyrolisConnector.version()}
+
+        Not configured yet!
+        Open http://localhost:#{port}/setup
+      =============================================
+      """)
+    end
+
+    if setup_requested? or not configured? do
+      open_browser("http://localhost:#{port}/setup")
     end
 
     {:ok, sup}
