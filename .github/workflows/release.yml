@@ -36,13 +36,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            pyrolis_connector/deps
-            pyrolis_connector/_build
-          key: linux-mix-${{ hashFiles('pyrolis_connector/mix.lock') }}
+            deps
+            _build
+          key: linux-mix-${{ hashFiles('mix.lock') }}
           restore-keys: linux-mix-
 
       - name: Build release
-        working-directory: pyrolis_connector
         run: |
           mix deps.get
           mix release
@@ -51,12 +50,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pyrolis-connector-linux-x86_64
-          path: pyrolis_connector/burrito_out/pyrolis_connector_linux
+          path: burrito_out/pyrolis_connector_linux
           if-no-files-found: error
 
   build-windows:
     name: Build Windows x86_64
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - uses: actions/checkout@v4
@@ -71,13 +70,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            pyrolis_connector/deps
-            pyrolis_connector/_build
-          key: windows-mix-${{ hashFiles('pyrolis_connector/mix.lock') }}
+            deps
+            _build
+          key: windows-mix-${{ hashFiles('mix.lock') }}
           restore-keys: windows-mix-
 
       - name: Build release
-        working-directory: pyrolis_connector
         run: |
           mix deps.get
           mix release
@@ -86,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pyrolis-connector-windows-x86_64
-          path: pyrolis_connector/burrito_out/pyrolis_connector_windows.exe
+          path: burrito_out/pyrolis_connector_windows.exe
           if-no-files-found: error
 
   release:
