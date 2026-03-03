@@ -240,10 +240,7 @@ defmodule PyrolisConnector.State do
 
   defp execute(conn, sql, params \\ []) do
     {:ok, stmt} = Exqlite.Sqlite3.prepare(conn, sql)
-
-    Enum.with_index(params, 1)
-    |> Enum.each(fn {val, idx} -> Exqlite.Sqlite3.bind(conn, stmt, idx, val) end)
-
+    :ok = Exqlite.Sqlite3.bind(stmt, params)
     :done = Exqlite.Sqlite3.step(conn, stmt)
     :ok = Exqlite.Sqlite3.release(conn, stmt)
     :ok
@@ -251,9 +248,7 @@ defmodule PyrolisConnector.State do
 
   defp query_all(conn, sql, params \\ []) do
     {:ok, stmt} = Exqlite.Sqlite3.prepare(conn, sql)
-
-    Enum.with_index(params, 1)
-    |> Enum.each(fn {val, idx} -> Exqlite.Sqlite3.bind(conn, stmt, idx, val) end)
+    :ok = Exqlite.Sqlite3.bind(stmt, params)
 
     rows = collect_rows(conn, stmt, [])
     :ok = Exqlite.Sqlite3.release(conn, stmt)
