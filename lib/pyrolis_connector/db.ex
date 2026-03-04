@@ -136,6 +136,10 @@ defmodule PyrolisConnector.DB do
     end
   end
 
+  defp do_connect("mock", config) do
+    {:ok, %{type: :mock, config: config}}
+  end
+
   defp do_connect("mysql", config) do
     opts = [
       hostname: Map.get(config, "host", "localhost"),
@@ -166,6 +170,9 @@ defmodule PyrolisConnector.DB do
       %{type: :mysql, pid: pid} ->
         GenServer.stop(pid, :normal)
 
+      %{type: :mock} ->
+        :ok
+
       nil ->
         :ok
     end
@@ -174,6 +181,10 @@ defmodule PyrolisConnector.DB do
   end
 
   # Query execution
+
+  defp execute_query(_ds_name, %{type: :mock, config: config}, sql, _params, state) do
+    {PyrolisConnector.MockData.query(sql, config), state}
+  end
 
   defp execute_query(ds_name, %{type: :odbc, ref: ref}, sql, params, state) do
     result =

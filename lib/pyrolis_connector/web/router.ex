@@ -12,6 +12,8 @@ defmodule PyrolisConnector.Web.Router do
   use Plug.Router
   use Gettext, backend: PyrolisConnector.Gettext
 
+  require Logger
+
   plug(:set_locale)
 
   plug(Plug.Parsers,
@@ -66,10 +68,62 @@ defmodule PyrolisConnector.Web.Router do
     send_resp(conn, 200, html)
   end
 
+  @default_base_url "https://pyrolis.com"
+
   get "/setup" do
     config = load_config()
-    html = render_page(gettext("Setup"), "/setup", setup_html(config))
+    error = conn.params["error"]
+    html = render_page(gettext("Setup"), "/setup", setup_html(config, error))
     send_resp(conn, 200, html)
+  end
+
+  post "/pair" do
+    input = String.trim(conn.params["pairing_code"] || "")
+
+    case String.split(input, ".", parts: 2) do
+      [subdomain, code] when subdomain != "" and code != "" ->
+        pair_url = build_tenant_url(subdomain, "/connector/pair")
+
+        case Req.post(pair_url, json: %{code: code}, receive_timeout: 15_000) do
+          {:ok, %{status: 200, body: body}} ->
+            PyrolisConnector.Config.save(%PyrolisConnector.Config{
+              url: body["url"],
+              api_key: body["api_key"],
+              connector_id: body["connector_id"]
+            })
+
+            # Restart relay to connect with new config
+            PyrolisConnector.Relay.reconnect_relay()
+
+            conn
+            |> put_resp_header("location", "/?paired=true")
+            |> send_resp(302, "")
+
+          {:ok, %{status: status}} when status in [404, 410] ->
+            conn
+            |> put_resp_header("location", "/setup?error=invalid_code")
+            |> send_resp(302, "")
+
+          {:error, %Req.TransportError{reason: reason}} ->
+            Logger.warning("Pairing connection failed: #{inspect(reason)}")
+
+            conn
+            |> put_resp_header("location", "/setup?error=connection_failed")
+            |> send_resp(302, "")
+
+          other ->
+            Logger.warning("Pairing failed: #{inspect(other)}")
+
+            conn
+            |> put_resp_header("location", "/setup?error=connection_failed")
+            |> send_resp(302, "")
+        end
+
+      _ ->
+        conn
+        |> put_resp_header("location", "/setup?error=invalid_format")
+        |> send_resp(302, "")
+    end
   end
 
   post "/setup" do
@@ -111,11 +165,15 @@ defmodule PyrolisConnector.Web.Router do
             "password" => conn.params["password"] || ""
           }
 
+        "mock" ->
+          %{"row_count" => conn.params["row_count"] || "25"}
+
         _ ->
           %{}
       end
 
     PyrolisConnector.State.save_data_source(name, db_type, config)
+    PyrolisConnector.Relay.report_status()
 
     conn
     |> put_resp_header("location", "/?saved=source")
@@ -125,6 +183,7 @@ defmodule PyrolisConnector.Web.Router do
   post "/sources/delete" do
     name = conn.params["name"]
     PyrolisConnector.State.delete_data_source(name)
+    PyrolisConnector.Relay.report_status()
 
     conn
     |> put_resp_header("location", "/")
@@ -449,29 +508,78 @@ defmodule PyrolisConnector.Web.Router do
     cloud_section <> sources_section <> history_section
   end
 
-  defp setup_html(config) do
+  defp setup_html(config, error) do
+    error_alert =
+      case error do
+        "invalid_code" ->
+          """
+          <div class="alert" style="background: #f8d7da; color: #721c24;">
+            #{gettext("Invalid or expired pairing code. Please generate a new one from the admin panel.")}
+          </div>
+          """
+
+        "invalid_format" ->
+          """
+          <div class="alert" style="background: #f8d7da; color: #721c24;">
+            #{gettext("Invalid format. The pairing code should look like: my-company.ABCD1234")}
+          </div>
+          """
+
+        "connection_failed" ->
+          """
+          <div class="alert" style="background: #f8d7da; color: #721c24;">
+            #{gettext("Could not reach the Pyrolis server. Check your internet connection and try again.")}
+          </div>
+          """
+
+        _ ->
+          ""
+      end
+
     """
+    #{error_alert}
+
     <div class="card">
-      <h2>#{gettext("Cloud Connection Setup")}</h2>
-      <form method="post" action="/setup">
+      <h2>#{gettext("Quick Setup")}</h2>
+      <p style="color: #666; font-size: 14px; margin-bottom: 16px;">
+        #{gettext("Enter the pairing code shown in your Pyrolis admin panel.")}
+      </p>
+      <form method="post" action="/pair">
         <div class="form-group">
-          <label>#{gettext("Pyrolis URL")}</label>
-          <input type="url" name="url" value="#{escape((config && config.url) || "")}" required placeholder="https://my-company.pyrolis.fr">
-          <div class="help">#{gettext("Your Pyrolis tenant URL")}</div>
-        </div>
-        <div class="form-group">
-          <label>#{gettext("API Key")}</label>
-          <input type="password" name="api_key" value="#{escape((config && config.api_key) || "")}" required placeholder="pyrk_...">
+          <label>#{gettext("Pairing Code")}</label>
+          <input type="text" name="pairing_code" required placeholder="#{gettext("e.g. my-company.ABCD1234")}" style="font-family: monospace; font-size: 16px; letter-spacing: 1px;" autocomplete="off">
           <div class="help">#{gettext("Generated in Pyrolis Admin > Integrations > Connectors")}</div>
         </div>
-        <div class="form-group">
-          <label>#{gettext("Connector ID")}</label>
-          <input type="text" name="connector_id" value="#{escape((config && config.connector_id) || "")}" required placeholder="#{gettext("e.g. paris-office-01")}">
-          <div class="help">#{gettext("Unique identifier for this connector instance")}</div>
-        </div>
-        <button type="submit" class="btn btn-primary">#{gettext("Save Configuration")}</button>
+        <button type="submit" class="btn btn-primary">#{gettext("Pair & Connect")}</button>
       </form>
     </div>
+
+    <details style="margin-top: 8px;">
+      <summary style="cursor: pointer; font-size: 14px; color: #888; padding: 8px 0;">
+        #{gettext("Or configure manually")}
+      </summary>
+      <div class="card" style="margin-top: 8px;">
+        <h2>#{gettext("Manual Configuration")}</h2>
+        <form method="post" action="/setup">
+          <div class="form-group">
+            <label>#{gettext("Pyrolis URL")}</label>
+            <input type="url" name="url" value="#{escape((config && config.url) || "")}" required placeholder="https://my-company.pyrolis.com">
+            <div class="help">#{gettext("Your Pyrolis tenant URL")}</div>
+          </div>
+          <div class="form-group">
+            <label>#{gettext("API Key")}</label>
+            <input type="password" name="api_key" value="#{escape((config && config.api_key) || "")}" required placeholder="pyrk_...">
+            <div class="help">#{gettext("API key from the admin panel")}</div>
+          </div>
+          <div class="form-group">
+            <label>#{gettext("Connector ID")}</label>
+            <input type="text" name="connector_id" value="#{escape((config && config.connector_id) || "")}" required placeholder="#{gettext("e.g. paris-office-01")}">
+            <div class="help">#{gettext("Unique identifier for this connector instance")}</div>
+          </div>
+          <button type="submit" class="btn btn-primary">#{gettext("Save Configuration")}</button>
+        </form>
+      </div>
+    </details>
     """
   end
 
@@ -520,6 +628,7 @@ defmodule PyrolisConnector.Web.Router do
           <select name="db_type" id="db_type" onchange="toggleFields()" required>
             <option value="odbc">ODBC (HFSQL, SQL Server, etc.)</option>
             <option value="mysql">MySQL / MariaDB</option>
+            <option value="mock">Mock (#{gettext("Test Data")})</option>
           </select>
         </div>
 
@@ -570,6 +679,17 @@ defmodule PyrolisConnector.Web.Router do
           </div>
         </div>
 
+        <div id="mock-fields" class="hidden">
+          <div style="padding: 8px 12px; background: #e8f4fd; color: #0c5460; border-radius: 4px; margin-bottom: 12px; font-size: 13px;">
+            <strong>&#9432;</strong> #{gettext("Mock mode generates realistic test data (clients, articles, installations) without a real database. Useful for E2E testing.")}
+          </div>
+          <div class="form-group">
+            <label>#{gettext("Rows per table")}</label>
+            <input type="number" name="row_count" value="25" min="1" max="1000">
+            <div class="help">#{gettext("Number of rows to generate for each table (default: 25)")}</div>
+          </div>
+        </div>
+
         <button type="submit" class="btn btn-primary">#{gettext("Add Data Source")}</button>
         <a href="/" class="btn btn-secondary" style="text-decoration: none; margin-left: 8px;">#{gettext("Cancel")}</a>
       </form>
@@ -580,6 +700,7 @@ defmodule PyrolisConnector.Web.Router do
         const type = document.getElementById('db_type').value;
         document.getElementById('odbc-fields').className = type === 'odbc' ? '' : 'hidden';
         document.getElementById('mysql-fields').className = type === 'mysql' ? '' : 'hidden';
+        document.getElementById('mock-fields').className = type === 'mock' ? '' : 'hidden';
       }
     </script>
     """
@@ -868,4 +989,21 @@ defmodule PyrolisConnector.Web.Router do
   end
 
   defp escape(other), do: escape(to_string(other))
+
+  @doc false
+  defp build_tenant_url(subdomain, path) do
+    base_url = System.get_env("PYROLIS_BASE_URL", @default_base_url)
+    uri = URI.parse(base_url)
+    host = "#{subdomain}.#{uri.host}"
+
+    port_part =
+      case {uri.scheme, uri.port} do
+        {"https", 443} -> ""
+        {"http", 80} -> ""
+        {_, nil} -> ""
+        {_, port} -> ":#{port}"
+      end
+
+    "#{uri.scheme}://#{host}#{port_part}#{path}"
+  end
 end

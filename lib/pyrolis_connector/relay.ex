@@ -86,6 +86,14 @@ defmodule PyrolisConnector.Relay do
     end
   end
 
+  @doc "Push updated data source status to the cloud."
+  def report_status do
+    case Process.whereis(__MODULE__) do
+      nil -> {:error, :not_running}
+      pid -> send(pid, :report_status) && :ok
+    end
+  end
+
   # Slipstream callbacks
 
   @impl Slipstream
@@ -271,15 +279,34 @@ defmodule PyrolisConnector.Relay do
   end
 
   def handle_info(:force_reconnect, socket) do
-    if socket.assigns[:config] do
-      Logger.info("Force reconnect requested")
+    Logger.info("Force reconnect requested, reloading config from disk")
 
-      case socket |> assign(:connection_status, :reconnecting) |> reconnect() do
-        {:ok, socket} -> {:noreply, socket}
-        {:error, _} -> {:noreply, socket}
-      end
-    else
-      {:noreply, socket}
+    case PyrolisConnector.Config.load() do
+      {:ok, config} ->
+        ws_url = PyrolisConnector.Config.ws_url(config)
+
+        socket =
+          socket
+          |> assign(:config, config)
+          |> assign(:connection_status, :connecting)
+          |> assign(:channel_joined, false)
+
+        # disconnect existing connection if any, then connect with new config
+        socket =
+          if socket.assigns[:connection_status] not in [:not_configured, nil] do
+            case disconnect(socket) do
+              {:ok, s} -> s
+              _ -> socket
+            end
+          else
+            socket
+          end
+
+        {:noreply, connect!(socket, uri: ws_url)}
+
+      {:error, :not_configured} ->
+        Logger.warning("Force reconnect failed: no config saved yet")
+        {:noreply, socket}
     end
   end
 
