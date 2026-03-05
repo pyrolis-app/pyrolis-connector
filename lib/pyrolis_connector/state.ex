@@ -64,6 +64,16 @@ defmodule PyrolisConnector.State do
     GenServer.call(__MODULE__, {:delete_data_source, name})
   end
 
+  # Settings (key-value in config table)
+
+  def get_setting(key) when is_binary(key) do
+    GenServer.call(__MODULE__, {:get_setting, key})
+  end
+
+  def save_setting(key, value) when is_binary(key) do
+    GenServer.call(__MODULE__, {:save_setting, key, value})
+  end
+
   # Sync run tracking
 
   def add_sync_run(resource_type, data_source \\ nil) do
@@ -120,6 +130,26 @@ defmodule PyrolisConnector.State do
         ])
       end)
     end)
+
+    {:reply, :ok, state}
+  end
+
+  # Settings
+
+  @impl true
+  def handle_call({:get_setting, key}, _from, %{conn: conn} = state) do
+    case query_all(conn, "SELECT value FROM config WHERE key = ?1", ["setting:#{key}"]) do
+      [[value]] -> {:reply, {:ok, value}, state}
+      [] -> {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:save_setting, key, value}, _from, %{conn: conn} = state) do
+    execute(conn, "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)", [
+      "setting:#{key}",
+      to_string(value)
+    ])
 
     {:reply, :ok, state}
   end

@@ -1,10 +1,33 @@
 defmodule PyrolisConnector.MixProject do
   use Mix.Project
 
+  @version (
+             # In CI, GITHUB_REF_NAME is the tag (e.g. pyrolis-connector-v0.3.0)
+             ci_tag = System.get_env("GITHUB_REF_NAME", "")
+
+             cond do
+               String.starts_with?(ci_tag, "pyrolis-connector-v") ->
+                 String.replace(ci_tag, "pyrolis-connector-v", "")
+
+               true ->
+                 case System.cmd("git", ["describe", "--tags", "--match",
+                        "pyrolis-connector-v*", "--always"],
+                        stderr_to_stdout: true) do
+                   {desc, 0} ->
+                     desc
+                     |> String.trim()
+                     |> String.replace(~r/^pyrolis-connector-v/, "")
+
+                   _ ->
+                     "0.0.0-dev"
+                 end
+             end
+           )
+
   def project do
     [
       app: :pyrolis_connector,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
