@@ -39,7 +39,7 @@ release:
     owner: pyrolis-app
     name: pyrolis-connector
   name_template: "Pyrolis Connector v{{.Version}}"
-  body: |
+  header: |
     ## Pyrolis Connector v{{.Version}}
 
     ### Installation
