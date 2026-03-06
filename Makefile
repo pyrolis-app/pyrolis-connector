@@ -1,4 +1,4 @@
-VERSION := $(shell git describe --tags --match 'pyrolis-connector-v*' --always 2>/dev/null | sed 's/^pyrolis-connector-v//')
+VERSION := $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
 LDFLAGS := -X main.version=$(VERSION)
 BINARY := pyrolis-connector
 GO := go
