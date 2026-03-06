@@ -48,6 +48,8 @@ defmodule PyrolisConnector.MixProject do
       {:slipstream, "~> 1.1"},
       # HTTP client (for initial auth + self-update)
       {:req, "~> 0.5"},
+      # CA certificates (needed for TLS on Windows/Burrito)
+      {:castore, "~> 1.0"},
       # JSON
       {:jason, "~> 1.4"},
       # i18n
