@@ -179,13 +179,17 @@ defmodule PyrolisConnector.Relay do
 
   @impl Slipstream
   def handle_message(_topic, "update_available", payload, socket) do
-    Logger.info("Update available: v#{payload["version"]}")
+    if PyrolisConnector.Updater.remote_updates_allowed?() do
+      Logger.info("Update available: v#{payload["version"]}")
 
-    PyrolisConnector.Updater.notify_available(
-      payload["version"],
-      payload["download_url"],
-      payload["checksum"]
-    )
+      PyrolisConnector.Updater.notify_available(
+        payload["version"],
+        payload["download_url"],
+        payload["checksum"]
+      )
+    else
+      Logger.info("Ignoring remote update push (remote updates disabled)")
+    end
 
     {:ok, socket}
   end

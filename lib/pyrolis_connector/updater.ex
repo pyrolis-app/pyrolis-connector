@@ -92,6 +92,16 @@ defmodule PyrolisConnector.Updater do
     end
   end
 
+  @doc "Check if remote (cloud-pushed) updates are allowed."
+  def remote_updates_allowed? do
+    PyrolisConnector.State.get_setting("allow_remote_updates") != "false"
+  end
+
+  @doc "Enable or disable remote update pushes."
+  def set_remote_updates(enabled) when is_boolean(enabled) do
+    PyrolisConnector.State.save_setting("allow_remote_updates", to_string(enabled))
+  end
+
   @doc "Dismiss the current update notification."
   def dismiss do
     case Process.whereis(__MODULE__) do

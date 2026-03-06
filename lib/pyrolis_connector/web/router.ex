@@ -354,6 +354,15 @@ defmodule PyrolisConnector.Web.Router do
     |> send_resp(302, "")
   end
 
+  post "/update/toggle-remote" do
+    allowed = PyrolisConnector.Updater.remote_updates_allowed?()
+    PyrolisConnector.Updater.set_remote_updates(!allowed)
+
+    conn
+    |> put_resp_header("location", "/")
+    |> send_resp(302, "")
+  end
+
   match _ do
     send_resp(
       conn,
@@ -1068,7 +1077,7 @@ defmodule PyrolisConnector.Web.Router do
         """
 
       _ ->
-        # :idle — show a subtle check button
+        # :idle — show a subtle check button + remote toggle
         checked_str =
           if update_status.checked_at do
             Calendar.strftime(update_status.checked_at, "%Y-%m-%d %H:%M")
@@ -1076,15 +1085,31 @@ defmodule PyrolisConnector.Web.Router do
             gettext("never")
           end
 
+        remote_allowed = PyrolisConnector.Updater.remote_updates_allowed?()
+
+        remote_label =
+          if remote_allowed,
+            do: gettext("Remote updates: enabled"),
+            else: gettext("Remote updates: disabled")
+
+        remote_color = if remote_allowed, do: "var(--success)", else: "var(--text-muted)"
+
         """
-        <div style="text-align: right; margin-bottom: 8px;">
-          <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()" id="check-update-btn" style="font-size: 12px;">
-            #{svg_icon(:refresh)} #{gettext("Check for updates")}
-          </button>
-          <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">
-            #{gettext("Last checked: %{time}", time: checked_str)}
-          </span>
-          <span id="update-status-msg" style="font-size: 12px; margin-left: 8px;"></span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <form method="post" action="/update/toggle-remote" style="display: inline;">
+            <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 12px;">
+              #{svg_icon(:settings)} <span style="color: #{remote_color};">#{remote_label}</span>
+            </button>
+          </form>
+          <div>
+            <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()" id="check-update-btn" style="font-size: 12px;">
+              #{svg_icon(:refresh)} #{gettext("Check for updates")}
+            </button>
+            <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">
+              #{gettext("Last checked: %{time}", time: checked_str)}
+            </span>
+            <span id="update-status-msg" style="font-size: 12px; margin-left: 8px;"></span>
+          </div>
           #{update_script()}
         </div>
         """
