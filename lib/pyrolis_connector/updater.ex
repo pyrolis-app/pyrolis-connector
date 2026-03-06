@@ -394,8 +394,19 @@ defmodule PyrolisConnector.Updater do
   defp schedule_restart do
     Task.start(fn ->
       Process.sleep(1_000)
-      Logger.info("Restarting application with new binary...")
-      System.restart()
+
+      case System.get_env("__BURRITO_BIN_PATH") do
+        path when is_binary(path) ->
+          # Re-exec the binary as a fresh OS process to avoid BEAM :low_entropy crash
+          Logger.info("Re-launching #{path}...")
+          Port.open({:spawn_executable, path}, [:binary, :exit_status, args: []])
+          Process.sleep(500)
+          System.halt(0)
+
+        _ ->
+          Logger.info("Restarting application...")
+          System.restart()
+      end
     end)
   end
 
