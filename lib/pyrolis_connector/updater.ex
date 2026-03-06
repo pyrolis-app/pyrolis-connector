@@ -28,7 +28,7 @@ defmodule PyrolisConnector.Updater do
 
   require Logger
 
-  @github_releases_url "https://github.com/Pyrolis-SAS/pyrolis-connector/releases"
+  @github_releases_url "https://github.com/pyrolis-app/pyrolis-connector/releases"
   @check_interval_ms :timer.hours(6)
 
   defstruct [
