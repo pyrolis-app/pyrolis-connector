@@ -428,7 +428,7 @@ defmodule PyrolisConnector.Updater do
         backup_path = bin_path <> ".bak"
 
         with :ok <- File.rename(bin_path, backup_path),
-             :ok <- File.rename(download_path, bin_path),
+             :ok <- move_file(download_path, bin_path),
              :ok <- make_executable(bin_path) do
           schedule_restart()
           :ok
@@ -449,7 +449,7 @@ defmodule PyrolisConnector.Updater do
 
         if File.exists?(dest), do: File.rename(dest, backup)
 
-        with :ok <- File.rename(download_path, dest),
+        with :ok <- move_file(download_path, dest),
              :ok <- make_executable(dest) do
           Logger.info("New binary placed at #{dest}")
           schedule_restart()
@@ -470,7 +470,7 @@ defmodule PyrolisConnector.Updater do
 
         if File.exists?(dest), do: File.rename(dest, backup)
 
-        with :ok <- File.rename(download_path, dest),
+        with :ok <- move_file(download_path, dest),
              :ok <- make_executable(dest) do
           Logger.info("New binary downloaded to #{dest}")
           Logger.info("Restart with: ./pyrolis-connector")
@@ -490,15 +490,16 @@ defmodule PyrolisConnector.Updater do
     Task.start(fn ->
       Process.sleep(1_000)
 
-      case System.get_env("__BURRITO_BIN_PATH") do
-        path when is_binary(path) ->
-          # Re-exec the binary as a fresh OS process to avoid BEAM :low_entropy crash
+      case {System.get_env("__BURRITO_BIN_PATH"), :os.type()} do
+        {path, {:unix, _}} when is_binary(path) ->
+          # Re-exec the binary as a fresh OS process to avoid BEAM :low_entropy crash on Linux
           Logger.info("Re-launching #{path}...")
           Port.open({:spawn_executable, path}, [:binary, :exit_status, args: []])
           Process.sleep(500)
           System.halt(0)
 
         _ ->
+          # On Windows or non-Burrito, System.restart works fine
           Logger.info("Restarting application...")
           System.restart()
       end
@@ -536,6 +537,19 @@ defmodule PyrolisConnector.Updater do
           root when is_binary(root) -> {:release, root}
           nil -> :unknown
         end
+    end
+  end
+
+  # File.rename fails across drives on Windows (:exdev), so fall back to copy+delete
+  defp move_file(src, dest) do
+    case File.rename(src, dest) do
+      :ok -> :ok
+      {:error, :exdev} ->
+        with :ok <- File.cp(src, dest) do
+          File.rm(src)
+          :ok
+        end
+      error -> error
     end
   end
 
