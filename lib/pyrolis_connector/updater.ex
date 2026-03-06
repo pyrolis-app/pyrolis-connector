@@ -424,36 +424,20 @@ defmodule PyrolisConnector.Updater do
   defp apply_verified_binary(download_path) do
     case current_binary_path() do
       {:burrito, bin_path} ->
-        case :os.type() do
-          {:win32, _} ->
-            # Windows: can't swap a running Burrito binary in-place.
-            # Stage the new binary next to the current one, write a .bat
-            # script that waits for this process to exit, does the swap,
-            # and relaunches.
-            new_path = bin_path <> ".new"
+        backup_path = bin_path <> ".bak"
 
-            with :ok <- move_file(download_path, new_path) do
-              schedule_windows_restart(bin_path, new_path)
-              :ok
+        with :ok <- File.rename(bin_path, backup_path),
+             :ok <- move_file(download_path, bin_path),
+             :ok <- make_executable(bin_path) do
+          schedule_restart()
+          :ok
+        else
+          {:error, reason} ->
+            if File.exists?(backup_path) and not File.exists?(bin_path) do
+              File.rename(backup_path, bin_path)
             end
 
-          _ ->
-            # Unix: in-place replacement works
-            backup_path = bin_path <> ".bak"
-
-            with :ok <- File.rename(bin_path, backup_path),
-                 :ok <- move_file(download_path, bin_path),
-                 :ok <- make_executable(bin_path) do
-              schedule_restart()
-              :ok
-            else
-              {:error, reason} ->
-                if File.exists?(backup_path) and not File.exists?(bin_path) do
-                  File.rename(backup_path, bin_path)
-                end
-
-                {:error, reason}
-            end
+            {:error, reason}
         end
 
       {:release, root} ->
@@ -505,9 +489,9 @@ defmodule PyrolisConnector.Updater do
     Task.start(fn ->
       Process.sleep(1_000)
 
-      case System.get_env("__BURRITO_BIN_PATH") do
-        path when is_binary(path) ->
-          # Re-exec the binary as a fresh OS process to avoid BEAM :low_entropy crash on Linux
+      case {System.get_env("__BURRITO_BIN_PATH"), :os.type()} do
+        {path, {:unix, _}} when is_binary(path) ->
+          # Re-exec as a fresh OS process to avoid BEAM :low_entropy crash on Linux
           Logger.info("Re-launching #{path}...")
           Port.open({:spawn_executable, path}, [:binary, :exit_status, args: []])
           Process.sleep(500)
@@ -517,39 +501,6 @@ defmodule PyrolisConnector.Updater do
           Logger.info("Restarting application...")
           System.restart()
       end
-    end)
-  end
-
-  defp schedule_windows_restart(bin_path, new_path) do
-    # Write a .bat script that:
-    # 1. Waits for our process to exit (via timeout)
-    # 2. Renames current binary to .bak
-    # 3. Renames .new to the original name
-    # 4. Relaunches the binary
-    # 5. Deletes itself
-    script_path = bin_path <> ".update.bat"
-
-    script = """
-    @echo off
-    echo Waiting for Pyrolis Connector to exit...
-    timeout /t 3 /nobreak >nul
-    if exist "#{bin_path}.bak" del /f "#{bin_path}.bak"
-    move /y "#{bin_path}" "#{bin_path}.bak"
-    move /y "#{new_path}" "#{bin_path}"
-    echo Starting updated Pyrolis Connector...
-    start "" "#{bin_path}"
-    del /f "%~f0"
-    """
-
-    File.write!(script_path, script)
-    Logger.info("Launching update script: #{script_path}")
-
-    Task.start(fn ->
-      Process.sleep(500)
-      # Launch the .bat detached via cmd /c start
-      System.cmd("cmd", ["/c", "start", "/b", "", script_path], stderr_to_stdout: true)
-      Process.sleep(500)
-      System.halt(0)
     end)
   end
 
