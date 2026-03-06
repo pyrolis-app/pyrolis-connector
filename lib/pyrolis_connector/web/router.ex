@@ -1098,21 +1098,16 @@ defmodule PyrolisConnector.Web.Router do
           end
 
         remote_allowed = PyrolisConnector.Updater.remote_updates_allowed?()
-
-        remote_label =
-          if remote_allowed,
-            do: gettext("Remote updates: enabled"),
-            else: gettext("Remote updates: disabled")
-
-        remote_color = if remote_allowed, do: "var(--success)", else: "var(--text-muted)"
-
         current_mode = PyrolisConnector.Updater.auto_apply_mode()
+
+        toggle_bg = if remote_allowed, do: "var(--primary)", else: "var(--border)"
+        toggle_x = if remote_allowed, do: "18px", else: "2px"
 
         mode_options =
           [
-            {"auto", gettext("Auto update")},
+            {"auto", gettext("Auto install")},
             {"download", gettext("Auto download")},
-            {"manual", gettext("Manual")}
+            {"manual", gettext("Notify only")}
           ]
           |> Enum.map(fn {val, label} ->
             selected = if val == current_mode, do: " selected", else: ""
@@ -1121,19 +1116,24 @@ defmodule PyrolisConnector.Web.Router do
           |> Enum.join()
 
         """
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <form method="post" action="/update/toggle-remote" style="display: inline;">
-              <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 12px;">
-                #{svg_icon(:settings)} <span style="color: #{remote_color};">#{remote_label}</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <form method="post" action="/update/toggle-remote" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;" title="#{if remote_allowed, do: gettext("Click to disable remote updates"), else: gettext("Click to enable remote updates")}">
+              <button type="submit" style="display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 0;">
+                <span style="position: relative; display: inline-block; width: 36px; height: 20px; border-radius: 10px; background: #{toggle_bg}; transition: background var(--transition);">
+                  <span style="position: absolute; top: 2px; left: #{toggle_x}; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: var(--shadow); transition: left var(--transition);"></span>
+                </span>
+                <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">#{gettext("Remote updates")}</span>
               </button>
             </form>
-            <form method="post" action="/update/set-mode" style="display: inline-flex; align-items: center; gap: 4px;">
-              <label style="font-size: 12px; color: var(--text-muted);">#{gettext("Mode:")}</label>
-              <select name="mode" onchange="this.form.submit()" style="font-size: 12px; padding: 3px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);">
+            #{if remote_allowed do """
+            <form method="post" action="/update/set-mode" style="display: inline-flex; align-items: center; gap: 6px;">
+              <label style="font-size: 12px; color: var(--text-muted); white-space: nowrap;">#{gettext("When pushed:")}</label>
+              <select name="mode" onchange="this.form.submit()" style="font-size: 12px; padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text);">
                 #{mode_options}
               </select>
             </form>
+            """ else "" end}
           </div>
           <div style="display: flex; align-items: center; gap: 6px;">
             <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()" id="check-update-btn" style="font-size: 12px;">
