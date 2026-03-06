@@ -1332,6 +1332,10 @@ defmodule PyrolisConnector.Web.Router do
                   <td>#{status_badge}</td>
                   <td class="actions">
                     <a href="/sources/#{URI.encode(ds.name)}/edit" class="btn btn-secondary btn-sm">#{gettext("Edit")}</a>
+                    <form method="post" action="/sources/delete" style="display:inline" onsubmit="return confirm('#{gettext("Delete %{name}?", name: escape(ds.name))}')">
+                      <input type="hidden" name="name" value="#{escape(ds.name)}">
+                      <button type="submit" class="btn btn-danger btn-sm">#{gettext("Delete")}</button>
+                    </form>
                   </td>
                 </tr>
                 """
