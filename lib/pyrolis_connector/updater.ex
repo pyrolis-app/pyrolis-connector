@@ -311,11 +311,23 @@ defmodule PyrolisConnector.Updater do
 
   # Private helpers
 
+  defp req_options(extra) do
+    # Explicitly pass CA certs for Burrito/Windows where auto-detection fails
+    ssl_opts =
+      if Code.ensure_loaded?(CAStore) do
+        [connect_options: [transport_opts: [cacertfile: CAStore.file_path()]]]
+      else
+        []
+      end
+
+    ssl_opts ++ extra
+  end
+
   defp check_github_releases do
     # Use GitHub API to get latest release
     api_url = String.replace(@github_releases_url, "github.com", "api.github.com/repos") <> "/latest"
 
-    case Req.get(api_url, headers: [{"accept", "application/vnd.github+json"}, {"user-agent", "pyrolis-connector"}], receive_timeout: 15_000) do
+    case Req.get(api_url, req_options(headers: [{"accept", "application/vnd.github+json"}, {"user-agent", "pyrolis-connector"}], receive_timeout: 15_000)) do
       {:ok, %{status: 200, body: body}} ->
         parse_github_release(body)
 
@@ -357,7 +369,7 @@ defmodule PyrolisConnector.Updater do
   defp fetch_checksum(nil, _filename), do: nil
 
   defp fetch_checksum(checksums_asset, filename) do
-    case Req.get(checksums_asset["browser_download_url"], receive_timeout: 10_000) do
+    case Req.get(checksums_asset["browser_download_url"], req_options(receive_timeout: 10_000)) do
       {:ok, %{status: 200, body: body}} when is_binary(body) ->
         body
         |> String.split("\n")
@@ -377,7 +389,7 @@ defmodule PyrolisConnector.Updater do
     tmp_dir = System.tmp_dir!()
     tmp_path = Path.join(tmp_dir, "pyrolis-connector-update-#{:erlang.unique_integer([:positive])}")
 
-    case Req.get(url, into: File.stream!(tmp_path), receive_timeout: 300_000) do
+    case Req.get(url, req_options(into: File.stream!(tmp_path), receive_timeout: 300_000)) do
       {:ok, %{status: 200}} ->
         {:ok, tmp_path}
 
