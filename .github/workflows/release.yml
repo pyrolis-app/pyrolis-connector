@@ -24,7 +24,7 @@ jobs:
           - runner: ubuntu-latest
             os_name: linux
             target_triple: x86_64-linux
-          - runner: windows-latest
+          - runner: windows-2022
             os_name: windows
             target_triple: x86_64-windows
 
