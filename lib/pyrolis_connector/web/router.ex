@@ -363,6 +363,14 @@ defmodule PyrolisConnector.Web.Router do
     |> send_resp(302, "")
   end
 
+  post "/update/toggle-logs" do
+    PyrolisConnector.LogForwarder.toggle()
+
+    conn
+    |> put_resp_header("location", "/")
+    |> send_resp(302, "")
+  end
+
   post "/update/set-mode" do
     mode = conn.params["mode"]
 
@@ -1124,6 +1132,14 @@ defmodule PyrolisConnector.Web.Router do
                   <span style="position: absolute; top: 2px; left: #{toggle_x}; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: var(--shadow); transition: left var(--transition);"></span>
                 </span>
                 <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">#{gettext("Remote updates")}</span>
+              </button>
+            </form>
+            <form method="post" action="/update/toggle-logs" style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer;" title="#{if PyrolisConnector.LogForwarder.enabled?(), do: gettext("Click to stop streaming logs"), else: gettext("Click to stream logs to cloud")}">
+              <button type="submit" style="display: inline-flex; align-items: center; gap: 8px; background: none; border: none; cursor: pointer; padding: 0;">
+                <span style="position: relative; display: inline-block; width: 36px; height: 20px; border-radius: 10px; background: #{if PyrolisConnector.LogForwarder.enabled?(), do: "var(--primary)", else: "var(--border)"}; transition: background var(--transition);">
+                  <span style="position: absolute; top: 2px; left: #{if PyrolisConnector.LogForwarder.enabled?(), do: "18px", else: "2px"}; width: 16px; height: 16px; border-radius: 50%; background: white; box-shadow: var(--shadow); transition: left var(--transition);"></span>
+                </span>
+                <span style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">#{gettext("Log streaming")}</span>
               </button>
             </form>
             #{if remote_allowed do """

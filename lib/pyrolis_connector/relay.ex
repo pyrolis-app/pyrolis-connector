@@ -22,6 +22,12 @@ defmodule PyrolisConnector.Relay do
     - `"ping"` — Ping the connector, expects a `"pong"` reply
       `%{}`
 
+    - `"enable_logs"` — Start streaming logs to cloud
+      `%{}`
+
+    - `"disable_logs"` — Stop streaming logs to cloud
+      `%{}`
+
   ### Outgoing (Connector → Cloud)
 
     - `"rows"` — Streamed query results (batched)
@@ -90,6 +96,16 @@ defmodule PyrolisConnector.Relay do
       nil -> {:error, :not_running}
       pid -> send(pid, :force_reconnect) && :ok
     end
+  end
+
+  @doc "Push log entries to the cloud."
+  def push_logs(entries) when is_list(entries) do
+    case Process.whereis(__MODULE__) do
+      nil -> :ok
+      pid -> send(pid, {:push_logs, entries})
+    end
+
+    :ok
   end
 
   @doc "Push updated data source status to the cloud."
@@ -208,6 +224,20 @@ defmodule PyrolisConnector.Relay do
   end
 
   @impl Slipstream
+  def handle_message(_topic, "enable_logs", _payload, socket) do
+    Logger.info("Log streaming enabled by cloud")
+    PyrolisConnector.LogForwarder.enable()
+    {:ok, socket}
+  end
+
+  @impl Slipstream
+  def handle_message(_topic, "disable_logs", _payload, socket) do
+    Logger.info("Log streaming disabled by cloud")
+    PyrolisConnector.LogForwarder.disable()
+    {:ok, socket}
+  end
+
+  @impl Slipstream
   def handle_message(topic, "ping", _payload, socket) do
     Logger.debug("Ping received from cloud")
     push(socket, topic, "pong", %{version: @version, timestamp: DateTime.utc_now()})
@@ -296,6 +326,15 @@ defmodule PyrolisConnector.Relay do
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:push_logs, entries}, socket) do
+    if socket.assigns[:config] && socket.assigns[:channel_joined] do
+      topic = "connector:#{socket.assigns.config.connector_id}"
+      push(socket, topic, "logs", %{entries: entries})
+    end
+
+    {:noreply, socket}
   end
 
   def handle_info(:report_status, socket) do
