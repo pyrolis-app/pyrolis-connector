@@ -224,6 +224,32 @@ defmodule PyrolisConnector.Relay do
   end
 
   @impl Slipstream
+  def handle_message(_topic, "configure_data_source", payload, socket) do
+    name = payload["name"]
+    db_type = payload["db_type"]
+    config = payload["config"] || %{}
+    enabled = Map.get(payload, "enabled", true)
+
+    Logger.info("Configuring data source '#{name}' (#{db_type}) from cloud")
+    PyrolisConnector.State.save_data_source(name, db_type, config, enabled)
+
+    # Report updated status back to cloud
+    send(self(), :report_status)
+
+    {:ok, socket}
+  end
+
+  @impl Slipstream
+  def handle_message(_topic, "delete_data_source", payload, socket) do
+    name = payload["name"]
+    Logger.info("Deleting data source '#{name}' from cloud")
+    PyrolisConnector.State.delete_data_source(name)
+
+    send(self(), :report_status)
+    {:ok, socket}
+  end
+
+  @impl Slipstream
   def handle_message(_topic, "enable_logs", _payload, socket) do
     Logger.info("Log streaming enabled by cloud")
     PyrolisConnector.LogForwarder.enable()
