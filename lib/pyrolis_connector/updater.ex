@@ -417,10 +417,12 @@ defmodule PyrolisConnector.Updater do
   defp apply_verified_binary(download_path) do
     case release_root() do
       {:ok, root} ->
-        # Standard Mix release: extract zip over the release directory
-        Logger.info("Extracting update to #{root}")
+        # Standard Mix release: zip contains pyrolis_connector/ prefix,
+        # so extract to the parent directory of RELEASE_ROOT
+        extract_to = Path.dirname(root)
+        Logger.info("Extracting update to #{extract_to} (release root: #{root})")
 
-        case :zip.unzip(String.to_charlist(download_path), [{:cwd, String.to_charlist(root)}]) do
+        case :zip.unzip(String.to_charlist(download_path), [{:cwd, String.to_charlist(extract_to)}]) do
           {:ok, _files} ->
             File.rm(download_path)
             # Make bin scripts executable on Unix
@@ -459,34 +461,23 @@ defmodule PyrolisConnector.Updater do
 
       case {release_root(), :os.type()} do
         {{:ok, root}, {:unix, _}} ->
-          # Use the release restart command for a clean restart
-          restart_script = Path.join([root, "bin", "pyrolis_connector"])
-
-          if File.exists?(restart_script) do
-            Logger.info("Restarting via release script...")
-            System.cmd(restart_script, ["restart"], stderr_to_stdout: true)
-            Process.sleep(500)
-            System.halt(0)
-          else
-            Logger.info("Restarting application...")
-            System.restart()
-          end
+          # Launch new process via release script, then halt current
+          script = Path.join([root, "bin", "pyrolis_connector"])
+          Logger.info("Launching updated release via #{script}...")
+          # Use daemon to start in background, then halt this process
+          System.cmd(script, ["daemon"], stderr_to_stdout: true)
+          Process.sleep(500)
+          System.halt(0)
 
         {{:ok, root}, {:win32, _}} ->
-          # Use the release .bat restart on Windows
-          restart_script = Path.join([root, "bin", "pyrolis_connector.bat"])
-
-          if File.exists?(restart_script) do
-            Logger.info("Restarting via release script...")
-            System.cmd("cmd", ["/c", restart_script, "restart"], stderr_to_stdout: true)
-            Process.sleep(500)
-            System.halt(0)
-          else
-            Logger.info("Restarting application...")
-            System.restart()
-          end
+          script = Path.join([root, "bin", "pyrolis_connector.bat"])
+          Logger.info("Launching updated release via #{script}...")
+          System.cmd("cmd", ["/c", "start", "/b", "", script, "start"], stderr_to_stdout: true)
+          Process.sleep(500)
+          System.halt(0)
 
         _ ->
+          # Dev mode fallback
           Logger.info("Restarting application...")
           System.restart()
       end
