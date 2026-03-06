@@ -19,6 +19,9 @@ defmodule PyrolisConnector.Relay do
     - `"restart"` — Restart the connector process
       `%{}`
 
+    - `"ping"` — Ping the connector, expects a `"pong"` reply
+      `%{}`
+
   ### Outgoing (Connector → Cloud)
 
     - `"rows"` — Streamed query results (batched)
@@ -194,6 +197,13 @@ defmodule PyrolisConnector.Relay do
       Logger.info("Ignoring remote update push (remote updates disabled)")
     end
 
+    {:ok, socket}
+  end
+
+  @impl Slipstream
+  def handle_message(topic, "ping", _payload, socket) do
+    Logger.debug("Ping received from cloud")
+    push(socket, topic, "pong", %{version: @version, timestamp: DateTime.utc_now()})
     {:ok, socket}
   end
 
