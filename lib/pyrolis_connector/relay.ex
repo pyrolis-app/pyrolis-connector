@@ -180,7 +180,13 @@ defmodule PyrolisConnector.Relay do
   @impl Slipstream
   def handle_message(_topic, "update_available", payload, socket) do
     Logger.info("Update available: v#{payload["version"]}")
-    # TODO: Implement self-update via PyrolisConnector.Updater
+
+    PyrolisConnector.Updater.notify_available(
+      payload["version"],
+      payload["download_url"],
+      payload["checksum"]
+    )
+
     {:ok, socket}
   end
 

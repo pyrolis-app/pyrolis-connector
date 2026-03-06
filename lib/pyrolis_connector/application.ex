@@ -24,6 +24,8 @@ defmodule PyrolisConnector.Application do
       PyrolisConnector.State,
       # Database connection manager (ODBC, MySQL, etc.)
       PyrolisConnector.DB,
+      # Self-update manager
+      PyrolisConnector.Updater,
       # Local web UI for setup and management
       {Bandit, plug: PyrolisConnector.Web.Router, port: port},
       # WebSocket relay to Pyrolis cloud
