@@ -1,0 +1,77 @@
+version: 2
+
+project_name: pyrolis-connector
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pyrolis-connector
+    main: ./cmd/pyrolis-connector
+    binary: pyrolis-connector
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: default
+    format: zip
+    name_template: "pyrolis-connector-{{.Version}}-{{.Os}}-{{.Arch}}"
+
+checksum:
+  name_template: SHA256SUMS.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: pyrolis-app
+    name: pyrolis-connector
+  name_template: "Pyrolis Connector v{{.Version}}"
+  body: |
+    ## Pyrolis Connector v{{.Version}}
+
+    ### Installation
+
+    Download the appropriate archive for your platform, extract, and run:
+
+    **Linux:**
+    ```bash
+    unzip pyrolis-connector-*-linux-amd64.zip
+    ./pyrolis-connector
+    ```
+
+    **Windows:**
+    Extract the zip and run `pyrolis-connector.exe`
+
+    **macOS:**
+    ```bash
+    unzip pyrolis-connector-*-darwin-*.zip
+    ./pyrolis-connector
+    ```
+
+    ### Running as a service
+
+    ```bash
+    # Install as system service
+    pyrolis-connector install
+
+    # Start the service
+    pyrolis-connector start
+    ```
+
+    ### Checksums
+    See `SHA256SUMS.txt` for file integrity verification.
+  draft: false
+  prerelease: false

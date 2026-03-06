@@ -417,71 +417,104 @@ defmodule PyrolisConnector.Updater do
   defp apply_verified_binary(download_path) do
     case release_root() do
       {:ok, root} ->
-        # Standard Mix release: zip contains pyrolis_connector/ prefix,
-        # so extract to the parent directory of RELEASE_ROOT
-        extract_to = Path.dirname(root)
-        Logger.info("Extracting update to #{extract_to} (release root: #{root})")
+        # Can't overwrite running ERTS binaries (:etxtbsy on Linux).
+        # Extract zip to a staging dir, then use a shell script to
+        # swap directories and relaunch after this process exits.
+        parent = Path.dirname(root)
+        staging = Path.join(parent, "pyrolis_connector_staging")
 
-        case :zip.unzip(String.to_charlist(download_path), [{:cwd, String.to_charlist(extract_to)}]) do
+        if File.exists?(staging), do: File.rm_rf!(staging)
+        File.mkdir_p!(staging)
+
+        Logger.info("Extracting update to staging dir: #{staging}")
+
+        case :zip.unzip(String.to_charlist(download_path), [{:cwd, String.to_charlist(staging)}]) do
           {:ok, _files} ->
             File.rm(download_path)
-            # Make bin scripts executable on Unix
-            bin_dir = Path.join(root, "bin")
+            new_root = Path.join(staging, "pyrolis_connector")
 
-            if match?({:unix, _}, :os.type()) do
-              case File.ls(bin_dir) do
-                {:ok, files} ->
-                  Enum.each(files, fn f -> File.chmod(Path.join(bin_dir, f), 0o755) end)
-
-                _ ->
-                  :ok
-              end
+            if File.exists?(new_root) do
+              schedule_swap_and_restart(root, new_root, staging)
+              :ok
+            else
+              Logger.error("Expected pyrolis_connector/ in zip but not found in #{staging}")
+              File.rm_rf!(staging)
+              {:error, "Invalid release zip structure"}
             end
-
-            schedule_restart()
-            :ok
 
           {:error, reason} ->
             Logger.error("Failed to extract update: #{inspect(reason)}")
             File.rm(download_path)
+            File.rm_rf!(staging)
             {:error, "Extract failed: #{inspect(reason)}"}
         end
 
       :unknown ->
-        # Dev mode: just log the path
         Logger.info("Update downloaded to #{download_path}")
         Logger.info("Not running as a release — please update manually")
         {:error, "Cannot auto-update in dev mode"}
     end
   end
 
-  defp schedule_restart do
-    Task.start(fn ->
-      Process.sleep(1_000)
+  # Writes a small script that swaps old release dir with new one, then launches.
+  # This runs after System.halt(0) so the ERTS binaries are no longer locked.
+  defp schedule_swap_and_restart(current_root, new_root, staging_dir) do
+    case :os.type() do
+      {:unix, _} ->
+        backup = current_root <> ".bak"
+        script_path = Path.join(Path.dirname(current_root), ".pyrolis_update.sh")
 
-      case {release_root(), :os.type()} do
-        {{:ok, root}, {:unix, _}} ->
-          # Launch new process via release script, then halt current
-          script = Path.join([root, "bin", "pyrolis_connector"])
-          Logger.info("Launching updated release via #{script}...")
-          # Use daemon to start in background, then halt this process
-          System.cmd(script, ["daemon"], stderr_to_stdout: true)
+        script = """
+        #!/bin/sh
+        sleep 2
+        rm -rf "#{backup}"
+        mv "#{current_root}" "#{backup}"
+        mv "#{new_root}" "#{current_root}"
+        rm -rf "#{staging_dir}"
+        chmod +x "#{current_root}/bin/pyrolis_connector"
+        chmod +x "#{current_root}"/erts-*/bin/*
+        "#{current_root}/bin/pyrolis_connector" daemon
+        rm -f "#{script_path}"
+        """
+
+        File.write!(script_path, script)
+        File.chmod!(script_path, 0o755)
+
+        Logger.info("Launching update script, halting current process...")
+
+        Task.start(fn ->
+          Process.sleep(500)
+          Port.open({:spawn_executable, String.to_charlist(script_path)}, [:binary, :exit_status])
           Process.sleep(500)
           System.halt(0)
+        end)
 
-        {{:ok, root}, {:win32, _}} ->
-          script = Path.join([root, "bin", "pyrolis_connector.bat"])
-          Logger.info("Launching updated release via #{script}...")
-          System.cmd("cmd", ["/c", "start", "/b", "", script, "start"], stderr_to_stdout: true)
+      {:win32, _} ->
+        backup = current_root <> ".bak"
+        script_path = Path.join(Path.dirname(current_root), "pyrolis_update.bat")
+
+        script = """
+        @echo off
+        timeout /t 3 /nobreak >nul
+        if exist "#{backup}" rmdir /s /q "#{backup}"
+        move "#{current_root}" "#{backup}"
+        move "#{new_root}" "#{current_root}"
+        rmdir /s /q "#{staging_dir}"
+        start "" "#{current_root}\\bin\\pyrolis_connector.bat" start
+        del /f "%~f0"
+        """
+
+        File.write!(script_path, script)
+
+        Logger.info("Launching update script, halting current process...")
+
+        Task.start(fn ->
+          Process.sleep(500)
+          System.cmd("cmd", ["/c", "start", "/b", "", script_path], stderr_to_stdout: true)
           Process.sleep(500)
           System.halt(0)
-
-        _ ->
-          # Dev mode fallback
-          Logger.info("Restarting application...")
-          System.restart()
-      end
-    end)
+        end)
+    end
   end
 
   defp return_and_cleanup({:error, _} = err, path) do

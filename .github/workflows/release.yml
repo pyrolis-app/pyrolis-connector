@@ -8,154 +8,24 @@ on:
 permissions:
   contents: write
 
-env:
-  MIX_ENV: prod
-
 jobs:
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.17.3"
-          otp-version: "27.1"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unixodbc-dev zip
-
-      - name: Build release
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
-          mix deps.get --only prod
-          mix release --overwrite
-
-      - name: Package release
-        run: |
-          cd _build/prod/rel
-          zip -r ../../../pyrolis-connector-x86_64-linux.zip pyrolis_connector/
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pyrolis-connector-x86_64-linux
-          path: pyrolis-connector-x86_64-linux.zip
-          if-no-files-found: error
-
-  build-windows:
-    name: Build Windows
-    runs-on: windows-2022
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          elixir-version: "1.17.3"
-          otp-version: "27.1"
-
-      - name: Build release
-        shell: bash
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
-          mix deps.get --only prod
-          mix release --overwrite
-
-      - name: Package release
-        shell: powershell
-        run: |
-          Compress-Archive -Path _build/prod/rel/pyrolis_connector/* -DestinationPath pyrolis-connector-x86_64-windows.zip
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pyrolis-connector-x86_64-windows
-          path: pyrolis-connector-x86_64-windows.zip
-          if-no-files-found: error
-
   release:
-    name: Create GitHub Release
-    needs: [build-linux, build-windows]
+    name: Build & Release
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
         with:
-          path: release/
-          merge-multiple: true
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#pyrolis-connector-v}" >> "$GITHUB_OUTPUT"
-
-      - name: Rename artifacts with version
-        run: |
-          cd release
-          for f in pyrolis-connector-*.zip; do
-            new_name=$(echo "$f" | sed "s/pyrolis-connector-/pyrolis-connector-${{ steps.version.outputs.VERSION }}-/")
-            mv "$f" "$new_name"
-          done
-
-      - name: Generate checksums
-        run: |
-          cd release
-          sha256sum * > SHA256SUMS.txt
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/setup-go@v5
         with:
-          name: Pyrolis Connector v${{ steps.version.outputs.VERSION }}
-          body: |
-            ## Pyrolis Connector v${{ steps.version.outputs.VERSION }}
+          go-version: '1.22'
 
-            ### Installation
-
-            **Linux:**
-            ```bash
-            unzip pyrolis-connector-*-linux.zip
-            cd pyrolis_connector
-            bin/pyrolis_connector start
-            ```
-
-            **Windows:**
-            Extract the zip and run:
-            ```
-            bin\pyrolis_connector.bat start
-            ```
-
-            ### Running as a service
-
-            **Linux (systemd):**
-            ```bash
-            bin/pyrolis_connector daemon
-            ```
-
-            **Windows:**
-            ```
-            bin\pyrolis_connector.bat install
-            bin\pyrolis_connector.bat start
-            ```
-
-            ### Checksums
-            See `SHA256SUMS.txt` for file integrity verification.
-          files: release/*
-          draft: false
-          prerelease: false
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
