@@ -95,7 +95,10 @@ defmodule PyrolisConnector.Updater do
 
   @doc "Check if remote (cloud-pushed) updates are allowed."
   def remote_updates_allowed? do
-    PyrolisConnector.State.get_setting("allow_remote_updates") != "false"
+    case PyrolisConnector.State.get_setting("allow_remote_updates") do
+      {:ok, "false"} -> false
+      _ -> true
+    end
   end
 
   @doc "Enable or disable remote update pushes."
@@ -111,7 +114,10 @@ defmodule PyrolisConnector.Updater do
   - `"manual"` — only notify, user must download and apply manually
   """
   def auto_apply_mode do
-    PyrolisConnector.State.get_setting("auto_apply_mode") || "auto"
+    case PyrolisConnector.State.get_setting("auto_apply_mode") do
+      {:ok, mode} when mode in ~w(auto download manual) -> mode
+      _ -> "auto"
+    end
   end
 
   @doc "Set the auto-apply mode."
