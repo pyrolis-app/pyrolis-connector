@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -25,13 +26,22 @@ func selfUpdate(newBinaryPath string) error {
 		return fmt.Errorf("chmod: %w", err)
 	}
 
-	// Try rename first (fast, same filesystem), fall back to copy (cross-filesystem)
+	// Try rename first (fast, same filesystem).
+	// If rename fails (cross-filesystem), copy to a temp file in the same dir
+	// as the current binary, then rename. We can't copy directly over a running
+	// binary on Linux (ETXTBSY), but rename swaps the directory entry atomically.
 	if err := os.Rename(newBinaryPath, currentBinary); err != nil {
-		slog.Info("Rename failed (cross-filesystem?), falling back to copy", "error", err)
-		if err := copyFile(newBinaryPath, currentBinary); err != nil {
-			return fmt.Errorf("copy: %w", err)
+		slog.Info("Rename failed (cross-filesystem?), staging via local copy", "error", err)
+		dir := filepath.Dir(currentBinary)
+		staged := filepath.Join(dir, ".pyrolis-connector.update")
+		if err := copyFile(newBinaryPath, staged); err != nil {
+			return fmt.Errorf("copy to staging: %w", err)
 		}
 		os.Remove(newBinaryPath)
+		if err := os.Rename(staged, currentBinary); err != nil {
+			os.Remove(staged)
+			return fmt.Errorf("rename staged binary: %w", err)
+		}
 	}
 
 	slog.Info("Binary replaced, re-executing...", "path", currentBinary)

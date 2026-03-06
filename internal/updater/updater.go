@@ -1,6 +1,7 @@
 package updater
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -237,9 +239,13 @@ func (u *Updater) Download() {
 	u.state.Error = ""
 	u.mu.Unlock()
 
+	u.mu.RLock()
+	checksum := u.state.Checksum
+	u.mu.RUnlock()
+
 	slog.Info("Downloading update", "url", url)
 
-	path, err := downloadFile(url)
+	path, err := downloadFile(url, checksum)
 	if err != nil {
 		slog.Error("Download failed", "error", err)
 		u.mu.Lock()
@@ -279,24 +285,10 @@ func (u *Updater) Apply() {
 		return
 	}
 	path := u.state.DownloadPath
-	checksum := u.state.Checksum
 	u.state.Status = StatusApplying
 	u.mu.Unlock()
 
 	slog.Info("Applying update", "path", path)
-
-	// Verify checksum
-	if checksum != "" {
-		if err := verifyChecksum(path, checksum); err != nil {
-			slog.Error("Checksum verification failed", "error", err)
-			os.Remove(path)
-			u.mu.Lock()
-			u.state.Status = StatusError
-			u.state.Error = err.Error()
-			u.mu.Unlock()
-			return
-		}
-	}
 
 	// Platform-specific binary replacement + restart
 	if err := selfUpdate(path); err != nil {
@@ -327,7 +319,8 @@ func PlatformTarget() string {
 	return fmt.Sprintf("%s-%s", os, arch)
 }
 
-func downloadFile(url string) (string, error) {
+func downloadFile(url, checksum string) (string, error) {
+	// Download to a temp file
 	tmpFile, err := os.CreateTemp("", "pyrolis-connector-update-*")
 	if err != nil {
 		return "", err
@@ -350,8 +343,69 @@ func downloadFile(url string) (string, error) {
 		os.Remove(tmpFile.Name())
 		return "", err
 	}
+	tmpFile.Close()
+
+	// Verify checksum on the downloaded archive before extracting
+	if checksum != "" {
+		if err := verifyChecksum(tmpFile.Name(), checksum); err != nil {
+			os.Remove(tmpFile.Name())
+			return "", fmt.Errorf("checksum: %w", err)
+		}
+	}
+
+	// If the download is a zip, extract the binary from it
+	if strings.HasSuffix(url, ".zip") {
+		extracted, err := extractBinaryFromZip(tmpFile.Name())
+		os.Remove(tmpFile.Name())
+		if err != nil {
+			return "", fmt.Errorf("extract zip: %w", err)
+		}
+		return extracted, nil
+	}
 
 	return tmpFile.Name(), nil
+}
+
+// extractBinaryFromZip opens a zip archive and extracts the pyrolis-connector binary.
+func extractBinaryFromZip(zipPath string) (string, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+
+	binaryName := "pyrolis-connector"
+	if runtime.GOOS == "windows" {
+		binaryName = "pyrolis-connector.exe"
+	}
+
+	for _, f := range r.File {
+		name := filepath.Base(f.Name)
+		if name != binaryName {
+			continue
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return "", err
+		}
+		defer rc.Close()
+
+		tmpFile, err := os.CreateTemp("", "pyrolis-connector-bin-*")
+		if err != nil {
+			return "", err
+		}
+
+		if _, err := io.Copy(tmpFile, rc); err != nil {
+			tmpFile.Close()
+			os.Remove(tmpFile.Name())
+			return "", err
+		}
+		tmpFile.Close()
+		return tmpFile.Name(), nil
+	}
+
+	return "", fmt.Errorf("binary %q not found in zip", binaryName)
 }
 
 func fetchChecksum(checksumURL, target string) string {
