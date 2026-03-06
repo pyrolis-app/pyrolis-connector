@@ -188,10 +188,17 @@ defmodule PyrolisConnector.Relay do
     if PyrolisConnector.Updater.remote_updates_allowed?() do
       Logger.info("Update available: v#{payload["version"]}")
 
+      # Pick platform-specific asset if available, fall back to generic URL
+      {download_url, checksum} =
+        case get_in(payload, ["platform_assets", PyrolisConnector.Updater.platform_target()]) do
+          %{"download_url" => url, "checksum" => cs} -> {url, cs}
+          _ -> {payload["download_url"], payload["checksum"]}
+        end
+
       PyrolisConnector.Updater.notify_available(
         payload["version"],
-        payload["download_url"],
-        payload["checksum"]
+        download_url,
+        checksum
       )
     else
       Logger.info("Ignoring remote update push (remote updates disabled)")

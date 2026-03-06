@@ -15,12 +15,18 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.os_name }}
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       matrix:
-        target: [linux, windows]
+        include:
+          - runner: ubuntu-latest
+            os_name: linux
+            target_triple: x86_64-linux
+          - runner: windows-latest
+            os_name: windows
+            target_triple: x86_64-windows
 
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +40,11 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Linux)
+        if: matrix.os_name == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y unixodbc-dev xz-utils p7zip-full
-          curl -L https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz | tar -xJ
-          sudo mv zig-x86_64-linux-0.15.2/zig /usr/local/bin/
-          sudo mv zig-x86_64-linux-0.15.2/lib /usr/local/lib/zig
+          sudo apt-get install -y unixodbc-dev
 
       - name: Cache deps
         uses: actions/cache@v4
@@ -48,31 +52,33 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ matrix.target }}-${{ hashFiles('mix.lock') }}-${{ hashFiles('lib/**/*.ex', 'config/**/*.exs') }}
+          key: mix-${{ matrix.os_name }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            mix-${{ matrix.target }}-${{ hashFiles('mix.lock') }}-
-            mix-${{ matrix.target }}-
+            mix-${{ matrix.os_name }}-
 
       - name: Build release
-        env:
-          BURRITO_TARGET: ${{ matrix.target }}
+        shell: bash
         run: |
           mix deps.get
-          mix compile --force
           mix release --overwrite
 
-      - name: Download VC++ Redistributable (Windows only)
-        if: matrix.target == 'windows'
+      - name: Package release (Linux)
+        if: matrix.os_name == 'linux'
         run: |
-          curl -L -o burrito_out/vc_redist.x64.exe https://aka.ms/vs/17/release/vc_redist.x64.exe
+          cd _build/prod/rel
+          zip -r ../../../pyrolis-connector-${{ matrix.target_triple }}.zip pyrolis_connector/
+
+      - name: Package release (Windows)
+        if: matrix.os_name == 'windows'
+        shell: powershell
+        run: |
+          Compress-Archive -Path _build/prod/rel/pyrolis_connector/* -DestinationPath pyrolis-connector-${{ matrix.target_triple }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pyrolis-connector-${{ matrix.target }}-x86_64
-          path: |
-            burrito_out/pyrolis_connector_${{ matrix.target }}*
-            ${{ matrix.target == 'windows' && 'burrito_out/vc_redist.x64.exe' || '' }}
+          name: pyrolis-connector-${{ matrix.target_triple }}
+          path: pyrolis-connector-${{ matrix.target_triple }}.zip
           if-no-files-found: error
 
   release:
@@ -93,14 +99,13 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF_NAME#pyrolis-connector-v}" >> "$GITHUB_OUTPUT"
 
-      - name: Rename artifacts
+      - name: Rename artifacts with version
         run: |
           cd release
-          for f in pyrolis_connector_*; do
-            new_name=$(echo "$f" | sed "s/pyrolis_connector_/pyrolis-connector-${{ steps.version.outputs.VERSION }}-/")
+          for f in pyrolis-connector-*.zip; do
+            new_name=$(echo "$f" | sed "s/pyrolis-connector-/pyrolis-connector-${{ steps.version.outputs.VERSION }}-/")
             mv "$f" "$new_name"
           done
-          chmod +x pyrolis-connector-*-linux* 2>/dev/null || true
 
       - name: Generate checksums
         run: |
@@ -118,18 +123,29 @@ jobs:
 
             **Linux:**
             ```bash
-            chmod +x pyrolis-connector-*-linux
-            ./pyrolis-connector-*-linux setup
+            unzip pyrolis-connector-*-linux.zip
+            cd pyrolis_connector
+            bin/pyrolis_connector start
             ```
 
             **Windows:**
-            Download the `.exe` file and run:
+            Extract the zip and run:
             ```
-            pyrolis-connector-*.exe setup
+            bin\pyrolis_connector.bat start
             ```
 
-            > **Note:** Windows requires the [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) (x64).
-            > If you see a `vcruntime140.dll` error, install `vc_redist.x64.exe` (included in this release) and retry.
+            ### Running as a service
+
+            **Linux (systemd):**
+            ```bash
+            bin/pyrolis_connector daemon
+            ```
+
+            **Windows:**
+            ```
+            bin\pyrolis_connector.bat install
+            bin\pyrolis_connector.bat start
+            ```
 
             ### Checksums
             See `SHA256SUMS.txt` for file integrity verification.

@@ -2,16 +2,16 @@ defmodule PyrolisConnector.Updater do
   @moduledoc """
   Self-update manager for the Pyrolis Connector.
 
-  Downloads new binary releases from GitHub, verifies their SHA-256 checksum,
-  replaces the running binary, and restarts the application.
+  Downloads new release zips from GitHub, verifies their SHA-256 checksum,
+  extracts over the release directory, and restarts.
 
   ## Update flow
 
   1. Cloud pushes `"update_available"` via WebSocket (or user clicks "Check for updates")
-  2. Updater downloads the new binary to a temp file
+  2. Updater downloads the release zip to a temp file
   3. Verifies the SHA-256 checksum
-  4. Replaces the current binary (backup kept as `<binary>.bak`)
-  5. Restarts the application via `System.restart/0`
+  4. Extracts the zip over the release directory (`RELEASE_ROOT`)
+  5. Restarts via the release script (or `System.restart/0`)
 
   ## State
 
@@ -312,15 +312,8 @@ defmodule PyrolisConnector.Updater do
   # Private helpers
 
   defp req_options(extra) do
-    # Explicitly pass CA certs for Burrito/Windows where auto-detection fails
-    ssl_opts =
-      if Code.ensure_loaded?(CAStore) do
-        [connect_options: [transport_opts: [cacertfile: CAStore.file_path()]]]
-      else
-        []
-      end
-
-    ssl_opts ++ extra
+    # Explicitly pass bundled CA certs for environments where auto-detection fails
+    [connect_options: [transport_opts: [cacertfile: CAStore.file_path()]]] ++ extra
   end
 
   defp check_github_releases do
@@ -346,11 +339,11 @@ defmodule PyrolisConnector.Updater do
     target = platform_target()
     assets = body["assets"] || []
 
-    # Find the binary asset for our platform
+    # Find the release zip for our platform
     binary_asset =
       Enum.find(assets, fn a ->
         name = a["name"] || ""
-        String.contains?(name, target) and not String.ends_with?(name, ".txt")
+        String.contains?(name, target) and String.ends_with?(name, ".zip")
       end)
 
     # Find SHA256SUMS.txt
@@ -422,66 +415,41 @@ defmodule PyrolisConnector.Updater do
   end
 
   defp apply_verified_binary(download_path) do
-    case current_binary_path() do
-      {:burrito, bin_path} ->
-        backup_path = bin_path <> ".bak"
+    case release_root() do
+      {:ok, root} ->
+        # Standard Mix release: extract zip over the release directory
+        Logger.info("Extracting update to #{root}")
 
-        with :ok <- File.rename(bin_path, backup_path),
-             :ok <- move_file(download_path, bin_path),
-             :ok <- make_executable(bin_path) do
-          schedule_restart()
-          :ok
-        else
-          {:error, reason} ->
-            if File.exists?(backup_path) and not File.exists?(bin_path) do
-              File.rename(backup_path, bin_path)
+        case :zip.unzip(String.to_charlist(download_path), [{:cwd, String.to_charlist(root)}]) do
+          {:ok, _files} ->
+            File.rm(download_path)
+            # Make bin scripts executable on Unix
+            bin_dir = Path.join(root, "bin")
+
+            if match?({:unix, _}, :os.type()) do
+              case File.ls(bin_dir) do
+                {:ok, files} ->
+                  Enum.each(files, fn f -> File.chmod(Path.join(bin_dir, f), 0o755) end)
+
+                _ ->
+                  :ok
+              end
             end
 
-            {:error, reason}
-        end
+            schedule_restart()
+            :ok
 
-      {:release, root} ->
-        # Standard release: place the new binary next to the release root
-        # so the user can switch to the standalone binary
-        dest = Path.join(Path.dirname(root), "pyrolis-connector")
-        backup = dest <> ".bak"
-
-        if File.exists?(dest), do: File.rename(dest, backup)
-
-        with :ok <- move_file(download_path, dest),
-             :ok <- make_executable(dest) do
-          Logger.info("New binary placed at #{dest}")
-          schedule_restart()
-          :ok
-        else
           {:error, reason} ->
-            if File.exists?(backup) and not File.exists?(dest) do
-              File.rename(backup, dest)
-            end
-
-            {:error, reason}
+            Logger.error("Failed to extract update: #{inspect(reason)}")
+            File.rm(download_path)
+            {:error, "Extract failed: #{inspect(reason)}"}
         end
 
       :unknown ->
-        # Dev mode (mix run): just place the binary in cwd
-        dest = Path.join(File.cwd!(), "pyrolis-connector")
-        backup = dest <> ".bak"
-
-        if File.exists?(dest), do: File.rename(dest, backup)
-
-        with :ok <- move_file(download_path, dest),
-             :ok <- make_executable(dest) do
-          Logger.info("New binary downloaded to #{dest}")
-          Logger.info("Restart with: ./pyrolis-connector")
-          :ok
-        else
-          {:error, reason} ->
-            if File.exists?(backup) and not File.exists?(dest) do
-              File.rename(backup, dest)
-            end
-
-            {:error, reason}
-        end
+        # Dev mode: just log the path
+        Logger.info("Update downloaded to #{download_path}")
+        Logger.info("Not running as a release — please update manually")
+        {:error, "Cannot auto-update in dev mode"}
     end
   end
 
@@ -489,13 +457,34 @@ defmodule PyrolisConnector.Updater do
     Task.start(fn ->
       Process.sleep(1_000)
 
-      case {System.get_env("__BURRITO_BIN_PATH"), :os.type()} do
-        {path, {:unix, _}} when is_binary(path) ->
-          # Re-exec as a fresh OS process to avoid BEAM :low_entropy crash on Linux
-          Logger.info("Re-launching #{path}...")
-          Port.open({:spawn_executable, path}, [:binary, :exit_status, args: []])
-          Process.sleep(500)
-          System.halt(0)
+      case {release_root(), :os.type()} do
+        {{:ok, root}, {:unix, _}} ->
+          # Use the release restart command for a clean restart
+          restart_script = Path.join([root, "bin", "pyrolis_connector"])
+
+          if File.exists?(restart_script) do
+            Logger.info("Restarting via release script...")
+            System.cmd(restart_script, ["restart"], stderr_to_stdout: true)
+            Process.sleep(500)
+            System.halt(0)
+          else
+            Logger.info("Restarting application...")
+            System.restart()
+          end
+
+        {{:ok, root}, {:win32, _}} ->
+          # Use the release .bat restart on Windows
+          restart_script = Path.join([root, "bin", "pyrolis_connector.bat"])
+
+          if File.exists?(restart_script) do
+            Logger.info("Restarting via release script...")
+            System.cmd("cmd", ["/c", restart_script, "restart"], stderr_to_stdout: true)
+            Process.sleep(500)
+            System.halt(0)
+          else
+            Logger.info("Restarting application...")
+            System.restart()
+          end
 
         _ ->
           Logger.info("Restarting application...")
@@ -527,38 +516,15 @@ defmodule PyrolisConnector.Updater do
 
   defp verify_checksum(_path, _other), do: :ok
 
-  defp current_binary_path do
-    case System.get_env("__BURRITO_BIN_PATH") do
-      path when is_binary(path) -> {:burrito, path}
-      nil ->
-        case System.get_env("RELEASE_ROOT") do
-          root when is_binary(root) -> {:release, root}
-          nil -> :unknown
-        end
+  defp release_root do
+    case System.get_env("RELEASE_ROOT") do
+      root when is_binary(root) -> {:ok, root}
+      nil -> :unknown
     end
   end
 
-  # File.rename fails across drives on Windows (:exdev), so fall back to copy+delete
-  defp move_file(src, dest) do
-    case File.rename(src, dest) do
-      :ok -> :ok
-      {:error, :exdev} ->
-        with :ok <- File.cp(src, dest) do
-          File.rm(src)
-          :ok
-        end
-      error -> error
-    end
-  end
-
-  defp make_executable(path) do
-    case :os.type() do
-      {:unix, _} -> File.chmod(path, 0o755)
-      _ -> :ok
-    end
-  end
-
-  defp platform_target do
+  @doc "Returns the platform identifier for asset matching."
+  def platform_target do
     case :os.type() do
       {:win32, _} -> "windows"
       {:unix, :darwin} -> "darwin"

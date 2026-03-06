@@ -48,7 +48,7 @@ defmodule PyrolisConnector.MixProject do
       {:slipstream, "~> 1.1"},
       # HTTP client (for initial auth + self-update)
       {:req, "~> 0.5"},
-      # CA certificates (needed for TLS on Windows/Burrito)
+      # CA certificates (bundled Mozilla CA store for TLS)
       {:castore, "~> 1.0"},
       # JSON
       {:jason, "~> 1.4"},
@@ -60,22 +60,15 @@ defmodule PyrolisConnector.MixProject do
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.6"},
       # DB drivers (optional — include what you need)
-      {:myxql, "~> 0.7", optional: true},
-      # Packaging
-      {:burrito, "~> 1.0", only: :prod, runtime: false}
+      {:myxql, "~> 0.7", optional: true}
     ]
   end
 
   defp releases do
     [
       pyrolis_connector: [
-        steps: if(Mix.env() == :prod, do: [:assemble, &Burrito.wrap/1], else: [:assemble]),
-        burrito: [
-          targets: [
-            windows: [os: :windows, cpu: :x86_64],
-            linux: [os: :linux, cpu: :x86_64]
-          ]
-        ]
+        include_erts: true,
+        cookie: "pyrolis-connector-cookie"
       ]
     ]
   end
