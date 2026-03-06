@@ -38,7 +38,8 @@ defmodule PyrolisConnector.Updater do
     :checksum,
     :download_path,
     :error,
-    :checked_at
+    :checked_at,
+    auto_apply: false
   ]
 
   # Client API
@@ -64,7 +65,7 @@ defmodule PyrolisConnector.Updater do
   def notify_available(version, download_url, checksum) do
     case Process.whereis(__MODULE__) do
       nil -> :ok
-      pid -> GenServer.cast(pid, {:update_available, version, download_url, checksum})
+      pid -> GenServer.cast(pid, {:update_available, version, download_url, checksum, :remote})
     end
   end
 
@@ -102,6 +103,22 @@ defmodule PyrolisConnector.Updater do
     PyrolisConnector.State.save_setting("allow_remote_updates", to_string(enabled))
   end
 
+  @doc """
+  Get the auto-apply mode for cloud-pushed updates.
+
+  - `"auto"` — download and apply automatically (default)
+  - `"download"` — download automatically, wait for manual apply
+  - `"manual"` — only notify, user must download and apply manually
+  """
+  def auto_apply_mode do
+    PyrolisConnector.State.get_setting("auto_apply_mode") || "auto"
+  end
+
+  @doc "Set the auto-apply mode."
+  def set_auto_apply_mode(mode) when mode in ~w(auto download manual) do
+    PyrolisConnector.State.save_setting("auto_apply_mode", mode)
+  end
+
   @doc "Dismiss the current update notification."
   def dismiss do
     case Process.whereis(__MODULE__) do
@@ -126,18 +143,41 @@ defmodule PyrolisConnector.Updater do
   end
 
   @impl true
-  def handle_cast({:update_available, version, download_url, checksum}, state) do
+  def handle_cast({:update_available, version, download_url, checksum, source}, state) do
     current = PyrolisConnector.version()
 
     if newer_version?(version, current) do
       Logger.info("Update available: v#{version} (current: v#{current})")
 
-      {:noreply,
-       %{state | status: :available, available_version: version, download_url: download_url, checksum: checksum, error: nil}}
+      new_state =
+        %{state | status: :available, available_version: version, download_url: download_url, checksum: checksum, error: nil}
+
+      # Auto-act on remote pushes based on configured mode
+      if source == :remote do
+        case auto_apply_mode() do
+          "auto" ->
+            Logger.info("Auto-apply mode: starting download and apply")
+            GenServer.cast(self(), :download_and_apply)
+
+          "download" ->
+            Logger.info("Auto-download mode: starting download")
+            GenServer.cast(self(), :download)
+
+          _ ->
+            :ok
+        end
+      end
+
+      {:noreply, new_state}
     else
       Logger.debug("Ignoring update v#{version}, already at v#{current}")
       {:noreply, state}
     end
+  end
+
+  # Legacy clause for local checks (no source)
+  def handle_cast({:update_available, version, download_url, checksum}, state) do
+    handle_cast({:update_available, version, download_url, checksum, :local}, state)
   end
 
   def handle_cast(:check_github, state) do
@@ -160,10 +200,27 @@ defmodule PyrolisConnector.Updater do
       send(me, {:download_result, result})
     end)
 
-    {:noreply, %{state | status: :downloading, error: nil}}
+    {:noreply, %{state | status: :downloading, error: nil, auto_apply: false}}
   end
 
   def handle_cast(:download, state) do
+    {:noreply, state}
+
+  end
+
+  def handle_cast(:download_and_apply, %{status: :available, download_url: url} = state) when is_binary(url) do
+    me = self()
+    Logger.info("Starting download from #{url} (will auto-apply)")
+
+    Task.start(fn ->
+      result = download_binary(url)
+      send(me, {:download_result, result})
+    end)
+
+    {:noreply, %{state | status: :downloading, error: nil, auto_apply: true}}
+  end
+
+  def handle_cast(:download_and_apply, state) do
     {:noreply, state}
   end
 
@@ -214,7 +271,14 @@ defmodule PyrolisConnector.Updater do
 
   def handle_info({:download_result, {:ok, path}}, state) do
     Logger.info("Download complete: #{path}")
-    {:noreply, %{state | status: :ready, download_path: path, error: nil}}
+    new_state = %{state | status: :ready, download_path: path, error: nil}
+
+    if state.auto_apply do
+      Logger.info("Auto-applying update...")
+      GenServer.cast(self(), :apply_update)
+    end
+
+    {:noreply, new_state}
   end
 
   def handle_info({:download_result, {:error, reason}}, state) do

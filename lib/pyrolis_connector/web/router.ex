@@ -363,6 +363,18 @@ defmodule PyrolisConnector.Web.Router do
     |> send_resp(302, "")
   end
 
+  post "/update/set-mode" do
+    mode = conn.params["mode"]
+
+    if mode in ~w(auto download manual) do
+      PyrolisConnector.Updater.set_auto_apply_mode(mode)
+    end
+
+    conn
+    |> put_resp_header("location", "/")
+    |> send_resp(302, "")
+  end
+
   match _ do
     send_resp(
       conn,
@@ -1077,7 +1089,7 @@ defmodule PyrolisConnector.Web.Router do
         """
 
       _ ->
-        # :idle — show a subtle check button + remote toggle
+        # :idle — show settings + check button
         checked_str =
           if update_status.checked_at do
             Calendar.strftime(update_status.checked_at, "%Y-%m-%d %H:%M")
@@ -1094,21 +1106,43 @@ defmodule PyrolisConnector.Web.Router do
 
         remote_color = if remote_allowed, do: "var(--success)", else: "var(--text-muted)"
 
+        current_mode = PyrolisConnector.Updater.auto_apply_mode()
+
+        mode_options =
+          [
+            {"auto", gettext("Auto update")},
+            {"download", gettext("Auto download")},
+            {"manual", gettext("Manual")}
+          ]
+          |> Enum.map(fn {val, label} ->
+            selected = if val == current_mode, do: " selected", else: ""
+            "<option value=\"#{val}\"#{selected}>#{label}</option>"
+          end)
+          |> Enum.join()
+
         """
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <form method="post" action="/update/toggle-remote" style="display: inline;">
-            <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 12px;">
-              #{svg_icon(:settings)} <span style="color: #{remote_color};">#{remote_label}</span>
-            </button>
-          </form>
-          <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <form method="post" action="/update/toggle-remote" style="display: inline;">
+              <button type="submit" class="btn btn-secondary btn-sm" style="font-size: 12px;">
+                #{svg_icon(:settings)} <span style="color: #{remote_color};">#{remote_label}</span>
+              </button>
+            </form>
+            <form method="post" action="/update/set-mode" style="display: inline-flex; align-items: center; gap: 4px;">
+              <label style="font-size: 12px; color: var(--text-muted);">#{gettext("Mode:")}</label>
+              <select name="mode" onchange="this.form.submit()" style="font-size: 12px; padding: 3px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface);">
+                #{mode_options}
+              </select>
+            </form>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
             <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()" id="check-update-btn" style="font-size: 12px;">
               #{svg_icon(:refresh)} #{gettext("Check for updates")}
             </button>
-            <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">
+            <span style="font-size: 11px; color: var(--text-muted);">
               #{gettext("Last checked: %{time}", time: checked_str)}
             </span>
-            <span id="update-status-msg" style="font-size: 12px; margin-left: 8px;"></span>
+            <span id="update-status-msg" style="font-size: 12px;"></span>
           </div>
           #{update_script()}
         </div>
