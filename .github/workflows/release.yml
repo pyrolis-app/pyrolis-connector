@@ -13,10 +13,8 @@ env:
 
 jobs:
   build-linux:
-    name: Build Linux (musl, portable)
-    runs-on: ubuntu-latest
-    container:
-      image: hexpm/elixir:1.17.3-erlang-27.1-alpine-3.20.3
+    name: Build Linux
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +22,16 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.17.3"
+          otp-version: "27.1"
+
       - name: Install system dependencies
         run: |
-          apk add --no-cache git build-base unixodbc-dev zip
+          sudo apt-get update
+          sudo apt-get install -y unixodbc-dev zip
 
       - name: Build release
         run: |
