@@ -21,7 +21,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: ubuntu-latest
+          - runner: ubuntu-22.04
             os_name: linux
             target_triple: x86_64-linux
           - runner: windows-2022
