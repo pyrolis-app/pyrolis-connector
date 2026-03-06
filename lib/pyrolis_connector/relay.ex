@@ -16,6 +16,9 @@ defmodule PyrolisConnector.Relay do
     - `"update_available"` — New binary version available
       `%{version, download_url, checksum}`
 
+    - `"restart"` — Restart the connector process
+      `%{}`
+
   ### Outgoing (Connector → Cloud)
 
     - `"rows"` — Streamed query results (batched)
@@ -190,6 +193,18 @@ defmodule PyrolisConnector.Relay do
     else
       Logger.info("Ignoring remote update push (remote updates disabled)")
     end
+
+    {:ok, socket}
+  end
+
+  @impl Slipstream
+  def handle_message(_topic, "restart", _payload, socket) do
+    Logger.info("Restart command received from cloud")
+
+    Task.start(fn ->
+      Process.sleep(1_000)
+      System.restart()
+    end)
 
     {:ok, socket}
   end
