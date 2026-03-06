@@ -153,18 +153,21 @@ defmodule PyrolisConnector.Updater do
         %{state | status: :available, available_version: version, download_url: download_url, checksum: checksum, error: nil}
 
       # Auto-act on remote pushes based on configured mode
+      mode = auto_apply_mode()
+      Logger.info("Update source: #{source}, auto_apply_mode: #{mode}")
+
       if source == :remote do
-        case auto_apply_mode() do
+        case mode do
           "auto" ->
-            Logger.info("Auto-apply mode: starting download and apply")
+            Logger.info("Auto-install: starting download and apply")
             GenServer.cast(self(), :download_and_apply)
 
           "download" ->
-            Logger.info("Auto-download mode: starting download")
+            Logger.info("Auto-download: starting download")
             GenServer.cast(self(), :download)
 
           _ ->
-            :ok
+            Logger.info("Manual mode: waiting for user action")
         end
       end
 
