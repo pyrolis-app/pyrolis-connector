@@ -10,23 +10,46 @@ permissions:
 
 env:
   MIX_ENV: prod
-  ELIXIR_VERSION: "1.17.3"
-  OTP_VERSION: "27.1"
 
 jobs:
-  build:
-    name: Build ${{ matrix.os_name }}
-    runs-on: ${{ matrix.runner }}
+  build-linux:
+    name: Build Linux (musl, portable)
+    runs-on: ubuntu-latest
+    container:
+      image: hexpm/elixir:1.17.3-erlang-27.1-alpine-3.20.3
 
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-22.04
-            os_name: linux
-            target_triple: x86_64-linux
-          - runner: windows-2022
-            os_name: windows
-            target_triple: x86_64-windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Install system dependencies
+        run: |
+          apk add --no-cache git build-base unixodbc-dev zip
+
+      - name: Build release
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get --only prod
+          mix release --overwrite
+
+      - name: Package release
+        run: |
+          cd _build/prod/rel
+          zip -r ../../../pyrolis-connector-x86_64-linux.zip pyrolis_connector/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyrolis-connector-x86_64-linux
+          path: pyrolis-connector-x86_64-linux.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-2022
 
     steps:
       - uses: actions/checkout@v4
@@ -37,53 +60,32 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - name: Install system dependencies (Linux)
-        if: matrix.os_name == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unixodbc-dev
-
-      - name: Cache deps
-        uses: actions/cache@v4
-        with:
-          path: |
-            deps
-            _build
-          key: mix-${{ matrix.os_name }}-${{ hashFiles('mix.lock') }}
-          restore-keys: |
-            mix-${{ matrix.os_name }}-
+          elixir-version: "1.17.3"
+          otp-version: "27.1"
 
       - name: Build release
         shell: bash
         run: |
-          mix deps.get
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get --only prod
           mix release --overwrite
 
-      - name: Package release (Linux)
-        if: matrix.os_name == 'linux'
-        run: |
-          cd _build/prod/rel
-          zip -r ../../../pyrolis-connector-${{ matrix.target_triple }}.zip pyrolis_connector/
-
-      - name: Package release (Windows)
-        if: matrix.os_name == 'windows'
+      - name: Package release
         shell: powershell
         run: |
-          Compress-Archive -Path _build/prod/rel/pyrolis_connector/* -DestinationPath pyrolis-connector-${{ matrix.target_triple }}.zip
+          Compress-Archive -Path _build/prod/rel/pyrolis_connector/* -DestinationPath pyrolis-connector-x86_64-windows.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pyrolis-connector-${{ matrix.target_triple }}
-          path: pyrolis-connector-${{ matrix.target_triple }}.zip
+          name: pyrolis-connector-x86_64-windows
+          path: pyrolis-connector-x86_64-windows.zip
           if-no-files-found: error
 
   release:
     name: Create GitHub Release
-    needs: [build]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
 
     steps:
