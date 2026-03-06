@@ -327,36 +327,76 @@ defmodule PyrolisConnector.Updater do
   end
 
   defp apply_verified_binary(download_path) do
-    current_binary = current_binary_path()
-
-    case current_binary do
-      nil ->
-        {:error, "Cannot determine current binary path (not running as Burrito binary)"}
-
-      bin_path ->
+    case current_binary_path() do
+      {:burrito, bin_path} ->
+        # In-place replacement of the single Burrito binary
         backup_path = bin_path <> ".bak"
 
         with :ok <- File.rename(bin_path, backup_path),
              :ok <- File.rename(download_path, bin_path),
              :ok <- make_executable(bin_path) do
-          # Schedule restart after a brief delay so the HTTP response can be sent
-          Task.start(fn ->
-            Process.sleep(1_000)
-            Logger.info("Restarting application with new binary...")
-            System.restart()
-          end)
-
+          schedule_restart()
           :ok
         else
           {:error, reason} ->
-            # Try to restore backup
             if File.exists?(backup_path) and not File.exists?(bin_path) do
               File.rename(backup_path, bin_path)
             end
 
             {:error, reason}
         end
+
+      {:release, root} ->
+        # Standard release: place the new binary next to the release root
+        # so the user can switch to the standalone binary
+        dest = Path.join(Path.dirname(root), "pyrolis-connector")
+        backup = dest <> ".bak"
+
+        if File.exists?(dest), do: File.rename(dest, backup)
+
+        with :ok <- File.rename(download_path, dest),
+             :ok <- make_executable(dest) do
+          Logger.info("New binary placed at #{dest}")
+          schedule_restart()
+          :ok
+        else
+          {:error, reason} ->
+            if File.exists?(backup) and not File.exists?(dest) do
+              File.rename(backup, dest)
+            end
+
+            {:error, reason}
+        end
+
+      :unknown ->
+        # Dev mode (mix run): just place the binary in cwd
+        dest = Path.join(File.cwd!(), "pyrolis-connector")
+        backup = dest <> ".bak"
+
+        if File.exists?(dest), do: File.rename(dest, backup)
+
+        with :ok <- File.rename(download_path, dest),
+             :ok <- make_executable(dest) do
+          Logger.info("New binary downloaded to #{dest}")
+          Logger.info("Restart with: ./pyrolis-connector")
+          :ok
+        else
+          {:error, reason} ->
+            if File.exists?(backup) and not File.exists?(dest) do
+              File.rename(backup, dest)
+            end
+
+            {:error, reason}
+        end
     end
+  end
+
+  defp schedule_restart do
+    Task.start(fn ->
+      Process.sleep(1_000)
+      Logger.info("Restarting application with new binary...")
+      System.restart()
+    end)
   end
 
   defp return_and_cleanup({:error, _} = err, path) do
@@ -383,13 +423,13 @@ defmodule PyrolisConnector.Updater do
   defp verify_checksum(_path, _other), do: :ok
 
   defp current_binary_path do
-    if Code.ensure_loaded?(Burrito.Util.Args) do
-      case apply(Burrito.Util.Args, :get_bin_path, []) do
-        :not_in_burrito -> nil
-        path -> path
-      end
-    else
-      nil
+    case System.get_env("__BURRITO_BIN_PATH") do
+      path when is_binary(path) -> {:burrito, path}
+      nil ->
+        case System.get_env("RELEASE_ROOT") do
+          root when is_binary(root) -> {:release, root}
+          nil -> :unknown
+        end
     end
   end
 
