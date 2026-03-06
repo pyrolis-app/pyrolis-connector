@@ -64,12 +64,13 @@ defmodule PyrolisConnector.Web.Router do
     {:ok, sources} = PyrolisConnector.State.list_data_sources()
     {:ok, history} = PyrolisConnector.State.get_sync_history(10)
     relay_status = PyrolisConnector.Relay.status()
+    update_status = PyrolisConnector.Updater.status()
 
     html =
       render_page(
         gettext("Dashboard"),
         "/",
-        dashboard_html(config, sources, history, relay_status)
+        dashboard_html(config, sources, history, relay_status, update_status)
       )
 
     send_resp(conn, 200, html)
@@ -300,6 +301,56 @@ defmodule PyrolisConnector.Web.Router do
 
     conn
     |> put_resp_header("location", "/debug")
+    |> send_resp(302, "")
+  end
+
+  # ── Update routes ──
+
+  get "/api/update-status" do
+    update = PyrolisConnector.Updater.status()
+
+    result = %{
+      status: to_string(update.status),
+      available_version: update.available_version,
+      error: update.error,
+      current_version: PyrolisConnector.version(),
+      checked_at: if(update.checked_at, do: DateTime.to_iso8601(update.checked_at))
+    }
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(result))
+  end
+
+  post "/update/check" do
+    PyrolisConnector.Updater.check_now()
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{ok: true}))
+  end
+
+  post "/update/download" do
+    PyrolisConnector.Updater.download()
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{ok: true}))
+  end
+
+  post "/update/apply" do
+    PyrolisConnector.Updater.apply_update()
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{ok: true, message: gettext("Applying update, restarting...")}))
+  end
+
+  post "/update/dismiss" do
+    PyrolisConnector.Updater.dismiss()
+
+    conn
+    |> put_resp_header("location", "/")
     |> send_resp(302, "")
   end
 
@@ -715,7 +766,7 @@ defmodule PyrolisConnector.Web.Router do
     """
   end
 
-  defp dashboard_html(config, sources, history, relay_status) do
+  defp dashboard_html(config, sources, history, relay_status, update_status) do
     cloud_section =
       if config do
         status_class = to_string(relay_status.connection_status)
@@ -933,7 +984,178 @@ defmodule PyrolisConnector.Web.Router do
     </script>
     """
 
-    cloud_section <> sources_section <> history_section <> auto_refresh
+    update_section = update_html(update_status)
+
+    cloud_section <> update_section <> sources_section <> history_section <> auto_refresh
+  end
+
+  defp update_html(update_status) do
+    case update_status.status do
+      :available ->
+        """
+        <div class="card" style="border-left: 3px solid var(--info);">
+          <h2>#{svg_icon(:refresh)} #{gettext("Update Available")}</h2>
+          <p style="margin-bottom: 12px;">
+            #{gettext("Version <strong>%{version}</strong> is available (current: %{current}).", version: update_status.available_version, current: PyrolisConnector.version())}
+          </p>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn btn-primary btn-sm" onclick="downloadUpdate()" id="download-btn">
+              #{gettext("Download & Install")}
+            </button>
+            <form method="post" action="/update/dismiss" style="display: inline;">
+              <button type="submit" class="btn btn-secondary btn-sm">#{gettext("Dismiss")}</button>
+            </form>
+            <span id="update-status-msg" style="font-size: 13px; color: var(--text-muted);"></span>
+          </div>
+          #{update_script()}
+        </div>
+        """
+
+      :downloading ->
+        """
+        <div class="card" style="border-left: 3px solid var(--warning);">
+          <h2>#{svg_icon(:refresh)} #{gettext("Downloading Update...")}</h2>
+          <p>#{gettext("Downloading version %{version}...", version: update_status.available_version)}</p>
+          <div id="update-status-msg" style="font-size: 13px; color: var(--text-muted); margin-top: 8px;">
+            #{gettext("Please wait...")}
+          </div>
+          #{update_script()}
+        </div>
+        """
+
+      :ready ->
+        """
+        <div class="card" style="border-left: 3px solid var(--success);">
+          <h2>#{svg_icon(:refresh)} #{gettext("Update Ready")}</h2>
+          <p style="margin-bottom: 12px;">
+            #{gettext("Version <strong>%{version}</strong> has been downloaded and verified.", version: update_status.available_version)}
+          </p>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="btn btn-primary btn-sm" onclick="applyUpdate()" id="apply-btn">
+              #{gettext("Apply & Restart")}
+            </button>
+            <form method="post" action="/update/dismiss" style="display: inline;">
+              <button type="submit" class="btn btn-secondary btn-sm">#{gettext("Dismiss")}</button>
+            </form>
+            <span id="update-status-msg" style="font-size: 13px; color: var(--text-muted);"></span>
+          </div>
+          #{update_script()}
+        </div>
+        """
+
+      :applying ->
+        """
+        <div class="card" style="border-left: 3px solid var(--warning);">
+          <h2>#{svg_icon(:refresh)} #{gettext("Applying Update...")}</h2>
+          <p>#{gettext("The connector is restarting with the new version. This page will reload automatically.")}</p>
+          <script>setTimeout(function() { location.reload(); }, 5000);</script>
+        </div>
+        """
+
+      :error ->
+        """
+        <div class="card" style="border-left: 3px solid var(--danger);">
+          <h2>#{svg_icon(:alert)} #{gettext("Update Error")}</h2>
+          <p style="color: var(--danger);">#{escape(update_status.error || gettext("Unknown error"))}</p>
+          <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()">#{gettext("Retry")}</button>
+            <form method="post" action="/update/dismiss" style="display: inline;">
+              <button type="submit" class="btn btn-secondary btn-sm">#{gettext("Dismiss")}</button>
+            </form>
+          </div>
+          #{update_script()}
+        </div>
+        """
+
+      _ ->
+        # :idle — show a subtle check button
+        checked_str =
+          if update_status.checked_at do
+            Calendar.strftime(update_status.checked_at, "%Y-%m-%d %H:%M")
+          else
+            gettext("never")
+          end
+
+        """
+        <div style="text-align: right; margin-bottom: 8px;">
+          <button class="btn btn-secondary btn-sm" onclick="checkForUpdate()" id="check-update-btn" style="font-size: 12px;">
+            #{svg_icon(:refresh)} #{gettext("Check for updates")}
+          </button>
+          <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">
+            #{gettext("Last checked: %{time}", time: checked_str)}
+          </span>
+          <span id="update-status-msg" style="font-size: 12px; margin-left: 8px;"></span>
+          #{update_script()}
+        </div>
+        """
+    end
+  end
+
+  defp update_script do
+    """
+    <script>
+      async function checkForUpdate() {
+        const msg = document.getElementById('update-status-msg');
+        if (msg) { msg.textContent = '#{gettext("Checking...")}'; msg.style.color = 'var(--text-muted)'; }
+        try {
+          await fetch('/update/check', { method: 'POST' });
+          // Poll for result
+          setTimeout(async function() {
+            const res = await fetch('/api/update-status');
+            const data = await res.json();
+            if (data.status === 'available') {
+              location.reload();
+            } else if (msg) {
+              msg.textContent = '#{gettext("Already up to date")}';
+              msg.style.color = 'var(--success)';
+            }
+          }, 3000);
+        } catch(e) {
+          if (msg) { msg.textContent = '#{gettext("Check failed")}'; msg.style.color = 'var(--danger)'; }
+        }
+      }
+
+      async function downloadUpdate() {
+        const btn = document.getElementById('download-btn');
+        const msg = document.getElementById('update-status-msg');
+        if (btn) btn.disabled = true;
+        if (msg) { msg.textContent = '#{gettext("Starting download...")}'; }
+        try {
+          await fetch('/update/download', { method: 'POST' });
+          // Poll until ready
+          const poll = setInterval(async function() {
+            const res = await fetch('/api/update-status');
+            const data = await res.json();
+            if (data.status === 'ready' || data.status === 'error') {
+              clearInterval(poll);
+              location.reload();
+            } else if (msg) {
+              msg.textContent = '#{gettext("Downloading...")}';
+            }
+          }, 2000);
+        } catch(e) {
+          if (msg) { msg.textContent = '#{gettext("Download failed")}'; msg.style.color = 'var(--danger)'; }
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      async function applyUpdate() {
+        const btn = document.getElementById('apply-btn');
+        const msg = document.getElementById('update-status-msg');
+        if (btn) btn.disabled = true;
+        if (msg) { msg.textContent = '#{gettext("Applying update...")}'; }
+        try {
+          await fetch('/update/apply', { method: 'POST' });
+          if (msg) { msg.textContent = '#{gettext("Restarting...")}'; }
+          // Wait and reload
+          setTimeout(function() { location.reload(); }, 5000);
+        } catch(e) {
+          if (msg) { msg.textContent = '#{gettext("Apply failed")}'; msg.style.color = 'var(--danger)'; }
+          if (btn) btn.disabled = false;
+        }
+      }
+    </script>
+    """
   end
 
   defp setup_html(config, error, error_context) do
