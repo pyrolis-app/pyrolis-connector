@@ -141,8 +141,8 @@ func (m *Manager) connect(name string, ds *config.DataSource) (Driver, error) {
 		driver = NewMockDriver()
 	case "mysql":
 		driver = NewMySQLDriver()
-	// case "odbc":
-	//	driver = NewODBCDriver() // build-tagged
+	case "odbc":
+		driver = NewODBCDriver()
 	default:
 		return nil, fmt.Errorf("unsupported database type: %s", ds.DBType)
 	}
