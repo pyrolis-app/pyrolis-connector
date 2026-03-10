@@ -18,6 +18,7 @@ import (
 	"github.com/pyrolis-app/pyrolis-connector/internal/db"
 	"github.com/pyrolis-app/pyrolis-connector/internal/logfwd"
 	"github.com/pyrolis-app/pyrolis-connector/internal/relay"
+	syncer "github.com/pyrolis-app/pyrolis-connector/internal/sync"
 	"github.com/pyrolis-app/pyrolis-connector/internal/tray"
 	"github.com/pyrolis-app/pyrolis-connector/internal/updater"
 	"github.com/pyrolis-app/pyrolis-connector/internal/web"
@@ -49,6 +50,9 @@ func main() {
 			return
 		case "version", "--version", "-v":
 			fmt.Printf("pyrolis-connector v%s\n", version)
+			return
+		case "sync":
+			runSync(args[1:])
 			return
 		}
 	}
@@ -163,10 +167,17 @@ func (p *program) Start(s service.Service) error {
 	}, baseHandler)
 	slog.SetDefault(slog.New(p.logFwd))
 
-	p.relay.SetHandler(newMessageHandler(p.relay, p.dbMgr, p.upd, p.logFwd))
+	handler := newMessageHandler(p.relay, p.dbMgr, p.upd, p.logFwd)
+	p.relay.SetHandler(handler)
+	p.relay.RestartFunc = restartSelf
+	p.relay.DBHealth = p.dbMgr
 
 	// Start relay
 	go p.relay.Start(p.ctx)
+
+	// Start HTTP polling fallback
+	poller := relay.NewPoller(p.relay, handler)
+	go poller.Start(p.ctx)
 
 	// Start web server
 	p.webSrv = web.NewServer(p.port, p.relay, p.dbMgr, p.upd, version)
@@ -276,6 +287,9 @@ func newMessageHandler(r *relay.Relay, dbMgr *db.Manager, upd *updater.Updater, 
 				config.DeleteDataSource(name)
 				r.ReportStatus()
 			}
+
+		case "sync_to_sqlite":
+			go handleSyncToSQLite(r, dbMgr, payload)
 
 		case "enable_logs":
 			slog.Info("Log streaming enabled by cloud")
@@ -398,21 +412,132 @@ func restartSelf() {
 	}
 }
 
+// runSync handles the "sync" CLI subcommand.
+//
+//	pyrolis-connector sync <data-source> [output.db]
+func runSync(args []string) {
+	if len(args) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: pyrolis-connector sync <data-source> [output.db]\n")
+		os.Exit(1)
+	}
+
+	dataSource := args[0]
+	output := dataSource + ".db"
+	if len(args) >= 2 {
+		output = args[1]
+	}
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	ds := cfg.FindDataSource(dataSource)
+	if ds == nil {
+		fmt.Fprintf(os.Stderr, "Data source '%s' not found in config.\nAvailable:", dataSource)
+		for _, d := range cfg.DataSources {
+			fmt.Fprintf(os.Stderr, " %s", d.Name)
+		}
+		fmt.Fprintln(os.Stderr)
+		os.Exit(1)
+	}
+
+	dbMgr := db.NewManager()
+	defer dbMgr.Close()
+
+	engine := syncer.NewEngine(dataSource, func(ds, sql string, params []interface{}) ([]string, [][]interface{}, error) {
+		return dbMgr.Query(ds, sql, params)
+	})
+	engine.SetProgressFunc(func(table string, rows int) {
+		fmt.Printf("  %s: %d rows\n", table, rows)
+	})
+
+	fmt.Printf("Syncing data source '%s' → %s\n", dataSource, output)
+	fmt.Printf("Tables: %d\n\n", len(syncer.SI2ATables))
+
+	ctx := context.Background()
+	result, err := engine.Run(ctx, output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\nSync failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nDone in %s: %d tables (%d rows), %d failed\n",
+		result.Elapsed.Round(time.Second), result.Tables, result.Rows, result.Failed)
+}
+
+// handleSyncToSQLite handles the "sync_to_sqlite" cloud command.
+func handleSyncToSQLite(r *relay.Relay, dbMgr *db.Manager, payload map[string]interface{}) {
+	requestID, _ := payload["request_id"].(string)
+	dataSource, _ := payload["data_source"].(string)
+	outputPath, _ := payload["output"].(string)
+
+	if dataSource == "" {
+		slog.Error("sync_to_sqlite: missing data_source")
+		return
+	}
+	if outputPath == "" {
+		outputPath = dataSource + ".db"
+	}
+
+	slog.Info("Starting SQLite sync", "data_source", dataSource, "output", outputPath, "request_id", requestID)
+
+	engine := syncer.NewEngine(dataSource, func(ds, sql string, params []interface{}) ([]string, [][]interface{}, error) {
+		return dbMgr.Query(ds, sql, params)
+	})
+	engine.SetProgressFunc(func(table string, rows int) {
+		slog.Info("Sync progress", "table", table, "rows", rows)
+	})
+
+	ctx := context.Background()
+	result, err := engine.Run(ctx, outputPath)
+	if err != nil {
+		slog.Error("SQLite sync failed", "error", err, "request_id", requestID)
+		r.Push("sync_result", map[string]interface{}{
+			"request_id": requestID,
+			"status":     "error",
+			"error":      err.Error(),
+		})
+		return
+	}
+
+	slog.Info("SQLite sync complete",
+		"tables", result.Tables, "rows", result.Rows,
+		"failed", result.Failed, "elapsed", result.Elapsed.String(),
+		"request_id", requestID)
+
+	r.Push("sync_result", map[string]interface{}{
+		"request_id": requestID,
+		"status":     "complete",
+		"tables":     result.Tables,
+		"rows":       result.Rows,
+		"failed":     result.Failed,
+		"elapsed_ms": result.Elapsed.Milliseconds(),
+		"output":     outputPath,
+	})
+}
+
 func printHelp() {
 	fmt.Printf(`Pyrolis Connector v%s
 
 Usage: pyrolis-connector [command]
 
 Commands:
-  run         Start the connector interactively (default)
-  setup       Start and open the setup wizard in browser
-  install     Install as a system service
-  uninstall   Remove the system service
-  start       Start the installed service
-  stop        Stop the installed service
-  restart     Restart the installed service
-  help        Show this help message
-  version     Show version
+  run                          Start the connector interactively (default)
+  setup                        Start and open the setup wizard in browser
+  sync <data-source> [out.db]  Sync data source to a local SQLite database
+  install                      Install as a system service
+  uninstall                    Remove the system service
+  start                        Start the installed service
+  stop                         Stop the installed service
+  restart                      Restart the installed service
+  help                         Show this help message
+  version                      Show version
 
 The connector starts a local web UI at http://localhost:4100
 for configuration and monitoring.
