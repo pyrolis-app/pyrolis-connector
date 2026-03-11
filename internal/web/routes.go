@@ -25,6 +25,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/test-source", s.handleTestSource)
 	s.mux.HandleFunc("/test-connection", s.handleTestConnection)
 	s.mux.HandleFunc("/debug", s.handleDebug)
+	s.mux.HandleFunc("/health", s.handleHealth)
 	s.mux.HandleFunc("/api/status", s.handleAPIStatus)
 	s.mux.HandleFunc("/api/update-status", s.handleAPIUpdateStatus)
 	s.mux.HandleFunc("/update/check", s.handleUpdateCheck)
@@ -705,7 +706,8 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 		"Status":       status,
 		"OS":           fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 		"GoVersion":    runtime.Version(),
-		"Memory":       fmt.Sprintf("%.1f MB", float64(mem.Alloc)/1024/1024),
+		"MemAlloc":     fmt.Sprintf("%.1f MB", float64(mem.Alloc)/1024/1024),
+		"MemSys":       fmt.Sprintf("%.1f MB", float64(mem.Sys)/1024/1024),
 		"NumGoroutine": runtime.NumGoroutine(),
 		"Port":         s.port,
 	}
@@ -772,12 +774,39 @@ const debugTmpl = `
     <tr><td style="width:180px; color:var(--text-muted); font-weight:500;">{{t "Version"}}</td><td class="mono">{{.Version}}</td></tr>
     <tr><td style="color:var(--text-muted); font-weight:500;">{{t "Platform"}}</td><td class="mono">{{.OS}}</td></tr>
     <tr><td style="color:var(--text-muted); font-weight:500;">Go</td><td class="mono">{{.GoVersion}}</td></tr>
-    <tr><td style="color:var(--text-muted); font-weight:500;">{{t "Memory"}}</td><td>{{.Memory}}</td></tr>
+    <tr><td style="color:var(--text-muted); font-weight:500;">{{t "Memory"}} (alloc)</td><td>{{.MemAlloc}}</td></tr>
+    <tr><td style="color:var(--text-muted); font-weight:500;">{{t "Memory"}} (sys)</td><td>{{.MemSys}}</td></tr>
     <tr><td style="color:var(--text-muted); font-weight:500;">Goroutines</td><td>{{.NumGoroutine}}</td></tr>
     <tr><td style="color:var(--text-muted); font-weight:500;">{{t "Web Port"}}</td><td>{{.Port}}</td></tr>
   </table>
 </div>
 `
+
+// --- Health Endpoint ---
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	status := s.relay.GetStatus()
+	healthy := status.ConnectionStatus == "connected" && status.ChannelJoined
+
+	code := 200
+	if !healthy {
+		code = 503
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"healthy":          healthy,
+		"status":           status.ConnectionStatus,
+		"channel_joined":   status.ChannelJoined,
+		"version":          s.version,
+		"uptime":           formatDuration(time.Since(status.StartedAt)),
+		"reconnect_count":  status.ReconnectCount,
+		"last_heartbeat_at": status.LastHeartbeatAt,
+		"last_pong_at":      status.LastPongAt,
+		"last_message_at":   status.LastMessageAt,
+	})
+}
 
 // --- API Endpoints ---
 
