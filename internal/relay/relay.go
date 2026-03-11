@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
+	"runtime"
 	"sync"
 	"time"
 
@@ -14,11 +16,24 @@ import (
 )
 
 const (
-	heartbeatInterval = 30 * time.Second
-	rowBatchSize      = 500
-	maxReconnectDelay = 60 * time.Second
-	maxRecent         = 20
+	heartbeatInterval  = 30 * time.Second
+	pongTimeout        = 10 * time.Second
+	readDeadline       = 45 * time.Second
+	writeDeadline      = 10 * time.Second
+	watchdogTimeout    = 90 * time.Second
+	watchdogCheck      = 15 * time.Second
+	selfRestartTimeout = 5 * time.Minute
+	rowBatchSize       = 500
+	maxReconnectDelay  = 60 * time.Second
+	maxRecent          = 20
 )
+
+// DBHealthChecker checks database connection health.
+// Implemented by db.Manager to avoid circular imports.
+type DBHealthChecker interface {
+	Connected(name string) bool
+	ListConnections() []string
+}
 
 // MessageHandler is called when the relay receives a message from the cloud.
 type MessageHandler func(event string, payload map[string]interface{})
@@ -38,6 +53,9 @@ type Relay struct {
 	connectionStatus string
 	channelJoined    bool
 	lastHeartbeatAt  *time.Time
+	lastPongAt       time.Time
+	lastMessageAt    time.Time
+	reconnectCount   int
 	commandsReceived int
 	recentCommands   []CommandEntry
 	recentErrors     []ErrorEntry
@@ -51,6 +69,13 @@ type Relay struct {
 
 	// Version string for heartbeat
 	version string
+
+	// RestartFunc is called when the relay needs to restart the process.
+	// Set from main.go to avoid circular imports.
+	RestartFunc func()
+
+	// DBHealth checks database connection status (set from main.go).
+	DBHealth DBHealthChecker
 }
 
 // CommandEntry tracks a received command.
@@ -73,6 +98,9 @@ type Status struct {
 	ConnectionStatus string         `json:"connection_status"`
 	ChannelJoined    bool           `json:"channel_joined"`
 	LastHeartbeatAt  *time.Time     `json:"last_heartbeat_at"`
+	LastPongAt       *time.Time     `json:"last_pong_at"`
+	LastMessageAt    *time.Time     `json:"last_message_at"`
+	ReconnectCount   int            `json:"reconnect_count"`
 	CommandsReceived int            `json:"commands_received"`
 	RecentCommands   []CommandEntry `json:"recent_commands"`
 	RecentErrors     []ErrorEntry   `json:"recent_errors"`
@@ -129,15 +157,26 @@ func (r *Relay) Reconnect() {
 func (r *Relay) GetStatus() Status {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return Status{
+
+	s := Status{
 		ConnectionStatus: r.connectionStatus,
 		ChannelJoined:    r.channelJoined,
 		LastHeartbeatAt:  r.lastHeartbeatAt,
+		ReconnectCount:   r.reconnectCount,
 		CommandsReceived: r.commandsReceived,
 		RecentCommands:   r.recentCommands,
 		RecentErrors:     r.recentErrors,
 		StartedAt:        r.startedAt,
 	}
+	if !r.lastPongAt.IsZero() {
+		t := r.lastPongAt
+		s.LastPongAt = &t
+	}
+	if !r.lastMessageAt.IsZero() {
+		t := r.lastMessageAt
+		s.LastMessageAt = &t
+	}
+	return s
 }
 
 // Push sends a message to the cloud.
@@ -175,6 +214,7 @@ func (r *Relay) TrackError(requestID, errMsg string) {
 // connectLoop handles connection, reconnection with exponential backoff.
 func (r *Relay) connectLoop(parentCtx context.Context, cfg *config.Config) {
 	delay := time.Second
+	var firstFailureAt time.Time
 
 	for {
 		select {
@@ -191,12 +231,32 @@ func (r *Relay) connectLoop(parentCtx context.Context, cfg *config.Config) {
 		err := r.runSession(parentCtx, cfg)
 		if err != nil {
 			slog.Warn("Relay session ended", "error", err)
+
+			// Track prolonged failure for self-restart
+			if firstFailureAt.IsZero() {
+				firstFailureAt = time.Now()
+			}
+		} else {
+			// Successful session (clean exit) — reset failure tracker
+			firstFailureAt = time.Time{}
+			delay = time.Second
 		}
 
 		select {
 		case <-parentCtx.Done():
 			return
 		default:
+		}
+
+		// Self-restart if failing for too long
+		if !firstFailureAt.IsZero() && time.Since(firstFailureAt) > selfRestartTimeout {
+			slog.Error("Connection failed for too long, triggering self-restart",
+				"failing_since", firstFailureAt,
+				"duration", time.Since(firstFailureAt))
+			if r.RestartFunc != nil {
+				go r.RestartFunc()
+				return
+			}
 		}
 
 		// Reload config in case it changed
@@ -208,11 +268,17 @@ func (r *Relay) connectLoop(parentCtx context.Context, cfg *config.Config) {
 		r.mu.Lock()
 		r.connectionStatus = "reconnecting"
 		r.channelJoined = false
+		r.reconnectCount++
 		r.mu.Unlock()
 
-		slog.Info("Reconnecting in", "delay", delay)
+		// Drain stale outgoing messages from previous session
+		r.drainOutgoing()
+
+		// Add jitter: ±25% to prevent thundering herd
+		jitter := time.Duration(float64(delay) * (0.75 + rand.Float64()*0.5))
+		slog.Info("Reconnecting in", "delay", jitter, "reconnect_count", r.reconnectCount)
 		select {
-		case <-time.After(delay):
+		case <-time.After(jitter):
 		case <-parentCtx.Done():
 			return
 		}
@@ -225,7 +291,22 @@ func (r *Relay) connectLoop(parentCtx context.Context, cfg *config.Config) {
 	}
 }
 
-// runSession connects, joins, and runs the read/write/heartbeat loops.
+// safeGo launches a goroutine with panic recovery. On panic, it sends an
+// error to errCh so the session reconnects instead of crashing silently.
+func safeGo(name string, errCh chan<- error, fn func() error) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("%s panicked: %v", name, r)
+				slog.Error("Goroutine panic recovered", "goroutine", name, "panic", r)
+				errCh <- err
+			}
+		}()
+		errCh <- fn()
+	}()
+}
+
+// runSession connects, joins, and runs the read/write/heartbeat/watchdog loops.
 // Returns when the connection is lost or context is cancelled.
 func (r *Relay) runSession(parentCtx context.Context, cfg *config.Config) error {
 	wsURL, err := cfg.WebSocketURL()
@@ -277,10 +358,13 @@ func (r *Relay) runSession(parentCtx context.Context, cfg *config.Config) error 
 		return fmt.Errorf("join rejected: %v", joinReply.Payload)
 	}
 
+	now := time.Now()
 	r.mu.Lock()
 	r.joinRef = joinRef
 	r.topic = topic
 	r.channelJoined = true
+	r.lastPongAt = now
+	r.lastMessageAt = now
 	r.mu.Unlock()
 
 	slog.Info("Joined channel", "topic", topic)
@@ -288,12 +372,13 @@ func (r *Relay) runSession(parentCtx context.Context, cfg *config.Config) error 
 	// Report initial status
 	r.reportStatus()
 
-	// Run read loop, write loop, and heartbeat in parallel
-	errCh := make(chan error, 3)
+	// Run read loop, write loop, heartbeat, and watchdog in parallel
+	errCh := make(chan error, 4)
 
-	go func() { errCh <- r.readLoop(ctx, conn) }()
-	go func() { errCh <- r.writeLoop(ctx, conn) }()
-	go func() { errCh <- r.heartbeatLoop(ctx, conn) }()
+	safeGo("readLoop", errCh, func() error { return r.readLoop(ctx, conn) })
+	safeGo("writeLoop", errCh, func() error { return r.writeLoop(ctx, conn) })
+	safeGo("heartbeatLoop", errCh, func() error { return r.heartbeatLoop(ctx, conn) })
+	safeGo("watchdogLoop", errCh, func() error { return r.watchdogLoop(ctx) })
 
 	// Wait for any goroutine to exit with error
 	err = <-errCh
@@ -304,7 +389,10 @@ func (r *Relay) runSession(parentCtx context.Context, cfg *config.Config) error 
 // readLoop reads and dispatches incoming messages.
 func (r *Relay) readLoop(ctx context.Context, conn *websocket.Conn) error {
 	for {
-		_, data, err := conn.Read(ctx)
+		// Use a read deadline to detect half-open connections
+		readCtx, readCancel := context.WithTimeout(ctx, readDeadline)
+		_, data, err := conn.Read(readCtx)
+		readCancel()
 		if err != nil {
 			return fmt.Errorf("read: %w", err)
 		}
@@ -314,6 +402,11 @@ func (r *Relay) readLoop(ctx context.Context, conn *websocket.Conn) error {
 			slog.Warn("Failed to decode message", "error", err)
 			continue
 		}
+
+		// Update watchdog timestamp on every message
+		r.mu.Lock()
+		r.lastMessageAt = time.Now()
+		r.mu.Unlock()
 
 		r.handleMessage(msg)
 	}
@@ -335,7 +428,7 @@ func (r *Relay) writeLoop(ctx context.Context, conn *websocket.Conn) error {
 	}
 }
 
-// heartbeatLoop sends periodic heartbeats.
+// heartbeatLoop sends periodic heartbeats and checks for pong timeouts.
 func (r *Relay) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error {
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
@@ -345,6 +438,15 @@ func (r *Relay) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			// Check if the previous heartbeat was acknowledged
+			r.mu.RLock()
+			lastPong := r.lastPongAt
+			r.mu.RUnlock()
+
+			if time.Since(lastPong) > heartbeatInterval+pongTimeout {
+				return fmt.Errorf("heartbeat pong timeout: no pong for %s", time.Since(lastPong))
+			}
+
 			hb := NewHeartbeat()
 			if err := r.sendMessage(ctx, conn, hb); err != nil {
 				return fmt.Errorf("heartbeat: %w", err)
@@ -361,11 +463,37 @@ func (r *Relay) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error {
 	}
 }
 
+// watchdogLoop monitors for prolonged message silence and forces reconnection.
+func (r *Relay) watchdogLoop(ctx context.Context) error {
+	ticker := time.NewTicker(watchdogCheck)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			r.mu.RLock()
+			lastMsg := r.lastMessageAt
+			r.mu.RUnlock()
+
+			if time.Since(lastMsg) > watchdogTimeout {
+				return fmt.Errorf("watchdog: no message received for %s", time.Since(lastMsg))
+			}
+		}
+	}
+}
+
 // handleMessage dispatches an incoming message to the appropriate handler.
 func (r *Relay) handleMessage(msg *Message) {
 	switch msg.Event {
 	case "phx_reply":
-		// Join/heartbeat replies handled inline
+		// Track pong for heartbeat replies on the "phoenix" topic
+		if msg.Topic == "phoenix" {
+			r.mu.Lock()
+			r.lastPongAt = time.Now()
+			r.mu.Unlock()
+		}
 		return
 
 	case "phx_error":
@@ -415,10 +543,21 @@ func (r *Relay) pushHeartbeat() {
 	uptime := int(time.Since(r.startedAt).Seconds())
 	r.mu.RUnlock()
 
+	dbConnected := false
+	if r.DBHealth != nil {
+		dbConnected = len(r.DBHealth.ListConnections()) > 0
+	}
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
 	r.Push("heartbeat", map[string]interface{}{
 		"version":        r.version,
 		"uptime_seconds": uptime,
-		"db_connected":   true, // TODO: check actual DB connections
+		"db_connected":   dbConnected,
+		"mem_alloc_mb":   float64(mem.Alloc) / 1024 / 1024,
+		"mem_sys_mb":     float64(mem.Sys) / 1024 / 1024,
+		"goroutines":     runtime.NumGoroutine(),
 	})
 }
 
@@ -431,10 +570,14 @@ func (r *Relay) reportStatus() {
 
 	sources := make([]map[string]interface{}, 0, len(cfg.DataSources))
 	for _, ds := range cfg.DataSources {
+		connected := false
+		if r.DBHealth != nil {
+			connected = r.DBHealth.Connected(ds.Name)
+		}
 		sources = append(sources, map[string]interface{}{
 			"name":      ds.Name,
 			"db_type":   ds.DBType,
-			"connected": false, // TODO: check actual connection
+			"connected": connected,
 			"enabled":   ds.Enabled,
 		})
 	}
@@ -456,13 +599,15 @@ func (r *Relay) PushLogs(entries []map[string]interface{}) {
 	})
 }
 
-// sendMessage encodes and writes a message to the WebSocket.
+// sendMessage encodes and writes a message to the WebSocket with a write deadline.
 func (r *Relay) sendMessage(ctx context.Context, conn *websocket.Conn, msg *Message) error {
 	data, err := msg.Encode()
 	if err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
-	return conn.Write(ctx, websocket.MessageText, data)
+	writeCtx, writeCancel := context.WithTimeout(ctx, writeDeadline)
+	defer writeCancel()
+	return conn.Write(writeCtx, websocket.MessageText, data)
 }
 
 // waitForReply reads messages until a reply with the given ref is received.
@@ -544,6 +689,23 @@ func (r *Relay) Pong() {
 		"version":   r.version,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// drainOutgoing discards all pending messages in the outgoing channel.
+// Called between sessions to avoid sending stale data on a new connection.
+func (r *Relay) drainOutgoing() {
+	drained := 0
+	for {
+		select {
+		case <-r.outCh:
+			drained++
+		default:
+			if drained > 0 {
+				slog.Info("Drained stale outgoing messages", "count", drained)
+			}
+			return
+		}
+	}
 }
 
 // Helpers
