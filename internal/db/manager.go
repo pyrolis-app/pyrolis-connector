@@ -198,6 +198,8 @@ func (m *Manager) connect(name string, ds *config.DataSource) (Driver, error) {
 		driver = NewMockDriver()
 	case "mysql":
 		driver = NewMySQLDriver()
+	case "sqlite":
+		driver = NewSQLiteDriver()
 	case "odbc":
 		driver = NewODBCDriver()
 	default:

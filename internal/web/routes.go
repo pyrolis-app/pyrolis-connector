@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -32,6 +34,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/update/toggle-remote", s.handleToggleRemote)
 	s.mux.HandleFunc("/update/toggle-logs", s.handleToggleLogs)
 	s.mux.HandleFunc("/update/set-mode", s.handleSetMode)
+	s.mux.HandleFunc("/api/browse", s.handleBrowse)
 }
 
 // --- Dashboard ---
@@ -531,6 +534,7 @@ const sourceFormTmpl = `
       <select name="db_type" id="db_type" onchange="toggleFields()">
         <option value="odbc" {{if eq .Source.DBType "odbc"}}selected{{end}}>ODBC (DSN)</option>
         <option value="mysql" {{if eq .Source.DBType "mysql"}}selected{{end}}>MySQL / MariaDB</option>
+        <option value="sqlite" {{if eq .Source.DBType "sqlite"}}selected{{end}}>SQLite</option>
         <option value="mock" {{if eq .Source.DBType "mock"}}selected{{end}}>Mock (test data)</option>
       </select>
     </div>
@@ -574,6 +578,17 @@ const sourceFormTmpl = `
       </div>
     </div>
 
+    <div id="sqlite-fields" class="hidden">
+      <div class="form-group">
+        <label>{{t "Database File"}}</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" name="path" id="sqlite-path" placeholder="{{t "e.g. C:\\Data\\si2a.db"}}" value="{{cfgval .Source.Config "path"}}" style="flex:1;">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="browseFile()" style="white-space:nowrap;">` + iconFolder + ` {{t "Browse"}}</button>
+        </div>
+        <div class="help">{{t "Path to the SQLite database file on this machine"}}</div>
+      </div>
+    </div>
+
     <div id="mock-fields" class="hidden">
       <div class="alert alert-info">` + iconAlert + ` {{t "Mock mode generates realistic test data for fire safety equipment."}}</div>
       <div class="form-group">
@@ -610,9 +625,46 @@ function toggleFields() {
   var t = document.getElementById('db_type').value;
   document.getElementById('odbc-fields').className = t === 'odbc' ? '' : 'hidden';
   document.getElementById('mysql-fields').className = t === 'mysql' ? '' : 'hidden';
+  document.getElementById('sqlite-fields').className = t === 'sqlite' ? '' : 'hidden';
   document.getElementById('mock-fields').className = t === 'mock' ? '' : 'hidden';
 }
 toggleFields();
+function browseFile() {
+  fetch('/api/browse?dir=' + encodeURIComponent(document.getElementById('sqlite-path').value || ''))
+    .then(function(r){return r.json()})
+    .then(function(data){
+      if (!data.entries) return;
+      var html = '<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;">';
+      if (data.parent) {
+        html += '<div class="browse-item" data-path="'+data.parent+'" data-dir="true" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;">' + iconFolder + ' ..</div>';
+      }
+      data.entries.forEach(function(e){
+        var icon = e.is_dir ? '` + iconFolder + `' : '` + iconFile + `';
+        html += '<div class="browse-item" data-path="'+e.path+'" data-dir="'+e.is_dir+'" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);">' + icon + ' ' + e.name + (e.size ? ' <small style="color:var(--text-muted);">(' + e.size + ')</small>' : '') + '</div>';
+      });
+      html += '</div>';
+      var existing = document.getElementById('browse-panel');
+      if (existing) existing.remove();
+      var panel = document.createElement('div');
+      panel.id = 'browse-panel';
+      panel.innerHTML = html;
+      document.getElementById('sqlite-path').parentNode.appendChild(panel);
+      panel.querySelectorAll('.browse-item').forEach(function(el){
+        el.addEventListener('click', function(){
+          if (el.dataset.dir === 'true') {
+            document.getElementById('sqlite-path').value = el.dataset.path;
+            browseFile();
+          } else {
+            document.getElementById('sqlite-path').value = el.dataset.path;
+            var bp = document.getElementById('browse-panel');
+            if (bp) bp.remove();
+          }
+        });
+        el.addEventListener('mouseenter', function(){ el.style.background = 'var(--hover)'; });
+        el.addEventListener('mouseleave', function(){ el.style.background = ''; });
+      });
+    });
+}
 </script>
 `
 
@@ -638,6 +690,8 @@ func (s *Server) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 		setIfPresent(dsConfig, "database", r.FormValue("database"))
 		setIfPresent(dsConfig, "username", r.FormValue("username"))
 		setIfPresent(dsConfig, "password", r.FormValue("mysql_password"))
+	case "sqlite":
+		setIfPresent(dsConfig, "path", r.FormValue("path"))
 	case "mock":
 		setIfPresent(dsConfig, "row_count", r.FormValue("row_count"))
 	}
@@ -919,6 +973,96 @@ func (s *Server) handle404(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setLocale(r *http.Request) {
 	lang := i18n.DetectLocale(r.Header.Get("Accept-Language"))
 	i18n.SetLocale(lang)
+}
+
+func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("dir")
+
+	// If dir looks like a file path (has extension), use its directory
+	if dir != "" {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	// Default to user's home directory
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			dir = "."
+		} else {
+			dir = home
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	type fileEntry struct {
+		Name  string `json:"name"`
+		Path  string `json:"path"`
+		IsDir bool   `json:"is_dir"`
+		Size  string `json:"size,omitempty"`
+	}
+
+	var result []fileEntry
+	for _, e := range entries {
+		// Skip hidden files
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+
+		path := filepath.Join(dir, e.Name())
+		fe := fileEntry{
+			Name:  e.Name(),
+			Path:  path,
+			IsDir: e.IsDir(),
+		}
+
+		if !e.IsDir() {
+			// Only show database-like files
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			if ext != ".db" && ext != ".sqlite" && ext != ".sqlite3" && ext != ".s3db" {
+				continue
+			}
+			if info, err := e.Info(); err == nil {
+				fe.Size = formatFileSize(info.Size())
+			}
+		}
+
+		result = append(result, fe)
+	}
+
+	// Compute parent directory
+	parent := filepath.Dir(dir)
+	if parent == dir {
+		parent = "" // at root
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"dir":     dir,
+		"parent":  parent,
+		"entries": result,
+	})
+}
+
+func formatFileSize(bytes int64) string {
+	switch {
+	case bytes >= 1024*1024*1024:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/(1024*1024*1024))
+	case bytes >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
+	case bytes >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
 }
 
 func setIfPresent(m map[string]string, key, value string) {
