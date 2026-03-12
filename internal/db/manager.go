@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 	"sync"
+
+	"golang.org/x/text/encoding/charmap"
+	"golang.org/x/text/transform"
 
 	"github.com/pyrolis-app/pyrolis-connector/internal/config"
 )
@@ -44,6 +48,13 @@ func (m *Manager) Query(dataSourceName, sql string, params []interface{}) ([]str
 		return nil, nil, err
 	}
 
+	// Look up data source config for encoding
+	cfg := config.Get()
+	var ds *config.DataSource
+	if cfg != nil {
+		ds = cfg.FindDataSource(dataSourceName)
+	}
+
 	columns, rows, err := driver.Query(sql, params)
 	if err != nil {
 		// Remove stale connection so it reconnects next time
@@ -51,6 +62,14 @@ func (m *Manager) Query(dataSourceName, sql string, params []interface{}) ([]str
 		delete(m.drivers, dataSourceName)
 		m.mu.Unlock()
 		return nil, nil, err
+	}
+
+	// Convert encoding if configured
+	if ds != nil && ds.Config["encoding"] != "" {
+		rows, err = convertEncoding(ds.Config["encoding"], rows)
+		if err != nil {
+			slog.Warn("Encoding conversion failed, returning raw data", "encoding", ds.Config["encoding"], "error", err)
+		}
 	}
 
 	return columns, rows, nil
@@ -122,6 +141,44 @@ func (m *Manager) ensureConnection(name string) (Driver, error) {
 	}
 
 	return m.connect(name, ds)
+}
+
+// lookupEncoding returns the charmap decoder for the given encoding name, or nil if UTF-8/unknown.
+// Supported: iso-8859-1, iso-8859-15, windows-1252.
+func lookupEncoding(name string) *charmap.Charmap {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "iso-8859-1", "iso8859-1", "latin1", "latin-1":
+		return charmap.ISO8859_1
+	case "iso-8859-15", "iso8859-15", "latin9", "latin-9":
+		return charmap.ISO8859_15
+	case "windows-1252", "cp1252", "win1252":
+		return charmap.Windows1252
+	default:
+		return nil
+	}
+}
+
+// convertEncoding converts all string values in rows from the given encoding to UTF-8.
+func convertEncoding(enc string, rows [][]interface{}) ([][]interface{}, error) {
+	cm := lookupEncoding(enc)
+	if cm == nil {
+		return rows, fmt.Errorf("unsupported encoding: %s", enc)
+	}
+	decoder := cm.NewDecoder()
+
+	for i, row := range rows {
+		for j, val := range row {
+			if s, ok := val.(string); ok {
+				decoded, _, err := transform.String(decoder, s)
+				if err != nil {
+					// Keep original on error
+					continue
+				}
+				rows[i][j] = decoded
+			}
+		}
+	}
+	return rows, nil
 }
 
 func (m *Manager) connect(name string, ds *config.DataSource) (Driver, error) {

@@ -584,6 +584,20 @@ const sourceFormTmpl = `
 
     <div class="divider"></div>
 
+    <details {{if cfgval .Source.Config "encoding"}}open{{end}}>
+      <summary>{{t "Advanced settings"}}</summary>
+      <div class="form-group" style="margin-top:12px;">
+        <label>{{t "Source Encoding"}}</label>
+        <select name="encoding">
+          <option value="">UTF-8 ({{t "default"}})</option>
+          <option value="iso-8859-15" {{if eq (cfgval .Source.Config "encoding") "iso-8859-15"}}selected{{end}}>ISO-8859-15 (Latin-9)</option>
+          <option value="iso-8859-1" {{if eq (cfgval .Source.Config "encoding") "iso-8859-1"}}selected{{end}}>ISO-8859-1 (Latin-1)</option>
+          <option value="windows-1252" {{if eq (cfgval .Source.Config "encoding") "windows-1252"}}selected{{end}}>Windows-1252</option>
+        </select>
+        <div class="help">{{t "Character encoding of the source database. Use ISO-8859-15 for HFSQL/SI2A databases."}}</div>
+      </div>
+    </details>
+
     <div class="flex" style="gap:12px;">
       <button type="submit" class="btn btn-primary">` + iconCheck + ` {{t "Save"}}</button>
       <a href="/" class="btn btn-secondary">{{t "Cancel"}}</a>
@@ -627,6 +641,9 @@ func (s *Server) handleSourceSave(w http.ResponseWriter, r *http.Request) {
 	case "mock":
 		setIfPresent(dsConfig, "row_count", r.FormValue("row_count"))
 	}
+
+	// Encoding applies to all driver types
+	setIfPresent(dsConfig, "encoding", r.FormValue("encoding"))
 
 	ds := config.DataSource{
 		Name:    name,
