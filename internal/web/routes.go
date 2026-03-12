@@ -629,19 +629,26 @@ function toggleFields() {
   document.getElementById('mock-fields').className = t === 'mock' ? '' : 'hidden';
 }
 toggleFields();
+var _iconFolder = '` + iconFolder + `';
+var _iconFile = '` + iconFile + `';
 function browseFile() {
   fetch('/api/browse?dir=' + encodeURIComponent(document.getElementById('sqlite-path').value || ''))
     .then(function(r){return r.json()})
     .then(function(data){
-      if (!data.entries) return;
+      if (data.error) { alert(data.error); return; }
+      var entries = data.entries || [];
       var html = '<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;margin-top:8px;">';
+      html += '<div style="padding:6px 10px;font-size:11px;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--bg);font-family:monospace;">' + data.dir + '</div>';
       if (data.parent) {
-        html += '<div class="browse-item" data-path="'+data.parent+'" data-dir="true" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;">' + iconFolder + ' ..</div>';
+        html += '<div class="browse-item" data-path="'+data.parent+'" data-dir="true" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;">' + _iconFolder + ' ..</div>';
       }
-      data.entries.forEach(function(e){
-        var icon = e.is_dir ? '` + iconFolder + `' : '` + iconFile + `';
+      entries.forEach(function(e){
+        var icon = e.is_dir ? _iconFolder : _iconFile;
         html += '<div class="browse-item" data-path="'+e.path+'" data-dir="'+e.is_dir+'" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);">' + icon + ' ' + e.name + (e.size ? ' <small style="color:var(--text-muted);">(' + e.size + ')</small>' : '') + '</div>';
       });
+      if (entries.length === 0) {
+        html += '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px;">{{t "No database files found in this directory."}}</div>';
+      }
       html += '</div>';
       var existing = document.getElementById('browse-panel');
       if (existing) existing.remove();
@@ -663,7 +670,8 @@ function browseFile() {
         el.addEventListener('mouseenter', function(){ el.style.background = 'var(--hover)'; });
         el.addEventListener('mouseleave', function(){ el.style.background = ''; });
       });
-    });
+    })
+    .catch(function(err){ alert('Browse error: ' + err.message); });
 }
 </script>
 `

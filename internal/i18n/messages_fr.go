@@ -71,6 +71,7 @@ var messagesFR = map[string]string{
 	"Browse":            "Parcourir",
 	"Path to the SQLite database file on this machine": "Chemin vers le fichier SQLite sur cette machine",
 	"e.g. C:\\Data\\si2a.db": "ex. C:\\Données\\si2a.db",
+	"No database files found in this directory.": "Aucun fichier de base de données trouvé dans ce répertoire.",
 	"No data sources configured.": "Aucune source de données configurée.",
 	"Edit":               "Modifier",
 	"Delete":             "Supprimer",
