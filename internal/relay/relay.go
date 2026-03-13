@@ -198,6 +198,22 @@ func (r *Relay) Push(event string, payload map[string]interface{}) {
 	}
 }
 
+// PushBlocking sends a message to the cloud, blocking until the channel has space.
+// Used for row streaming where backpressure is needed to avoid dropping data.
+func (r *Relay) PushBlocking(event string, payload map[string]interface{}) {
+	r.mu.RLock()
+	jr := r.joinRef
+	topic := r.topic
+	r.mu.RUnlock()
+
+	if jr == "" || topic == "" {
+		return
+	}
+
+	msg := NewPush(jr, topic, event, payload)
+	r.outCh <- msg
+}
+
 // TrackError records an error in recent errors.
 func (r *Relay) TrackError(requestID, errMsg string) {
 	r.mu.Lock()
@@ -633,7 +649,7 @@ func (r *Relay) waitForReply(ctx context.Context, conn *websocket.Conn, ref stri
 }
 
 // StreamRowBatch sends a single batch of rows to the cloud.
-// Used by the streaming query path to send rows as they are read from the database.
+// Blocks until the outgoing channel has space, applying backpressure to the DB cursor.
 func (r *Relay) StreamRowBatch(requestID string, columns []string, rows [][]interface{}, done bool) {
 	rowMaps := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
@@ -646,7 +662,7 @@ func (r *Relay) StreamRowBatch(requestID string, columns []string, rows [][]inte
 		rowMaps = append(rowMaps, m)
 	}
 
-	r.Push("rows", map[string]interface{}{
+	r.PushBlocking("rows", map[string]interface{}{
 		"request_id": requestID,
 		"rows":       rowMaps,
 		"done":       done,
