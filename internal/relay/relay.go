@@ -23,7 +23,7 @@ const (
 	watchdogTimeout    = 90 * time.Second
 	watchdogCheck      = 15 * time.Second
 	selfRestartTimeout = 5 * time.Minute
-	rowBatchSize       = 500
+	RowBatchSize       = 500
 	maxReconnectDelay  = 60 * time.Second
 	maxRecent          = 20
 )
@@ -632,43 +632,43 @@ func (r *Relay) waitForReply(ctx context.Context, conn *websocket.Conn, ref stri
 	}
 }
 
-// StreamRows sends query result rows in batches.
+// StreamRowBatch sends a single batch of rows to the cloud.
+// Used by the streaming query path to send rows as they are read from the database.
+func (r *Relay) StreamRowBatch(requestID string, columns []string, rows [][]interface{}, done bool) {
+	rowMaps := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		m := make(map[string]interface{}, len(columns))
+		for j, col := range columns {
+			if j < len(row) {
+				m[col] = row[j]
+			}
+		}
+		rowMaps = append(rowMaps, m)
+	}
+
+	r.Push("rows", map[string]interface{}{
+		"request_id": requestID,
+		"rows":       rowMaps,
+		"done":       done,
+	})
+}
+
+// StreamRows sends query result rows in batches. Kept for backward compatibility.
 func (r *Relay) StreamRows(requestID string, columns []string, rows [][]interface{}) {
 	total := len(rows)
 
 	if total == 0 {
-		r.Push("rows", map[string]interface{}{
-			"request_id": requestID,
-			"rows":       []interface{}{},
-			"done":       true,
-		})
+		r.StreamRowBatch(requestID, columns, nil, true)
 		return
 	}
 
-	for i := 0; i < total; i += rowBatchSize {
-		end := i + rowBatchSize
+	for i := 0; i < total; i += RowBatchSize {
+		end := i + RowBatchSize
 		if end > total {
 			end = total
 		}
-		batch := rows[i:end]
 		isLast := end >= total
-
-		rowMaps := make([]map[string]interface{}, 0, len(batch))
-		for _, row := range batch {
-			m := make(map[string]interface{}, len(columns))
-			for j, col := range columns {
-				if j < len(row) {
-					m[col] = row[j]
-				}
-			}
-			rowMaps = append(rowMaps, m)
-		}
-
-		r.Push("rows", map[string]interface{}{
-			"request_id": requestID,
-			"rows":       rowMaps,
-			"done":       isLast,
-		})
+		r.StreamRowBatch(requestID, columns, rows[i:end], isLast)
 	}
 
 	slog.Info("Streamed rows", "request_id", requestID, "count", total)

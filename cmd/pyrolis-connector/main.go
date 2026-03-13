@@ -26,6 +26,9 @@ import (
 
 var version = "0.0.0-dev"
 
+// querySem limits concurrent query goroutines to prevent memory explosion.
+var querySem = make(chan struct{}, 3)
+
 // program implements the kardianos/service.Interface.
 type program struct {
 	ctx    context.Context
@@ -315,16 +318,49 @@ func handleQuery(r *relay.Relay, dbMgr *db.Manager, payload map[string]interface
 		params = p
 	}
 
+	// Acquire semaphore to limit concurrent queries
+	querySem <- struct{}{}
+	defer func() { <-querySem }()
+
 	slog.Info("Executing query", "request_id", requestID, "data_source", dsName)
 
-	columns, rows, err := dbMgr.Query(dsName, sqlStr, params)
+	// Stream rows in batches to avoid loading entire result set into memory
+	var columns []string
+	batch := make([][]interface{}, 0, relay.RowBatchSize)
+	totalRows := 0
+
+	flush := func(done bool) {
+		if len(batch) == 0 && !done {
+			return
+		}
+		r.StreamRowBatch(requestID, columns, batch, done)
+		totalRows += len(batch)
+		batch = make([][]interface{}, 0, relay.RowBatchSize)
+	}
+
+	cols, err := dbMgr.QueryStream(dsName, sqlStr, params, func(row []interface{}) error {
+		batch = append(batch, row)
+		if len(batch) >= relay.RowBatchSize {
+			flush(false)
+		}
+		return nil
+	})
 	if err != nil {
 		slog.Error("Query failed", "request_id", requestID, "error", err)
 		r.PushQueryError(requestID, err.Error())
 		return
 	}
+	columns = cols
 
-	r.StreamRows(requestID, columns, rows)
+	// Flush remaining rows + done signal
+	flush(true)
+
+	slog.Info("Streamed rows", "request_id", requestID, "count", totalRows)
+
+	// Hint GC to release query memory promptly
+	if totalRows > 10000 {
+		runtime.GC()
+	}
 }
 
 func handleConfigureDataSource(payload map[string]interface{}) {

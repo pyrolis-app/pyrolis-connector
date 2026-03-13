@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -41,6 +42,11 @@ func (d *SQLiteDriver) Connect(cfg map[string]string) error {
 		db.Close()
 		return fmt.Errorf("ping sqlite: %w", err)
 	}
+
+	// Connection pool limits
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	d.db = db
 	d.path = path
@@ -86,6 +92,47 @@ func (d *SQLiteDriver) Query(sqlStr string, params []interface{}) ([]string, [][
 	}
 
 	return columns, result, rows.Err()
+}
+
+func (d *SQLiteDriver) QueryStream(sqlStr string, params []interface{}, cb RowCallback) ([]string, error) {
+	if d.db == nil {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	rows, err := d.db.Query(sqlStr, params...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite query: %w", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("sqlite columns: %w", err)
+	}
+
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		ptrs := make([]interface{}, len(columns))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return columns, fmt.Errorf("sqlite scan: %w", err)
+		}
+		row := make([]interface{}, len(columns))
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				row[i] = string(b)
+			} else {
+				row[i] = v
+			}
+		}
+		if err := cb(row); err != nil {
+			return columns, err
+		}
+	}
+
+	return columns, rows.Err()
 }
 
 func (d *SQLiteDriver) Connected() bool {

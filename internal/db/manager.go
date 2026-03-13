@@ -15,12 +15,23 @@ import (
 
 var selectPattern = regexp.MustCompile(`(?i)^\s*SELECT\b`)
 
+// RowCallback is called for each row during streaming query execution.
+// Returning a non-nil error aborts the query.
+type RowCallback func(row []interface{}) error
+
 // Driver is the interface each database backend must implement.
 type Driver interface {
 	Connect(cfg map[string]string) error
 	Query(sql string, params []interface{}) (columns []string, rows [][]interface{}, err error)
 	Connected() bool
 	Close() error
+}
+
+// StreamingDriver is an optional interface for drivers that support row-by-row streaming.
+// This avoids loading entire result sets into memory.
+type StreamingDriver interface {
+	Driver
+	QueryStream(sql string, params []interface{}, cb RowCallback) (columns []string, err error)
 }
 
 // Manager manages database connections for multiple data sources.
@@ -73,6 +84,80 @@ func (m *Manager) Query(dataSourceName, sql string, params []interface{}) ([]str
 	}
 
 	return columns, rows, nil
+}
+
+// QueryStream executes a SQL query and streams rows via callback, avoiding loading everything into memory.
+// Falls back to Query + iteration if the driver doesn't support streaming.
+func (m *Manager) QueryStream(dataSourceName, sql string, params []interface{}, cb RowCallback) ([]string, error) {
+	if !selectPattern.MatchString(sql) {
+		return nil, fmt.Errorf("only SELECT queries are allowed")
+	}
+
+	driver, err := m.ensureConnection(dataSourceName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Look up data source config for encoding
+	cfg := config.Get()
+	var ds *config.DataSource
+	if cfg != nil {
+		ds = cfg.FindDataSource(dataSourceName)
+	}
+
+	// Wrap callback with encoding conversion if needed
+	wrappedCB := cb
+	if ds != nil && ds.Config["encoding"] != "" {
+		cm := lookupEncoding(ds.Config["encoding"])
+		if cm != nil {
+			decoder := cm.NewDecoder()
+			wrappedCB = func(row []interface{}) error {
+				for j, val := range row {
+					if s, ok := val.(string); ok {
+						decoded, _, err := transform.String(decoder, s)
+						if err == nil {
+							row[j] = decoded
+						}
+					}
+				}
+				return cb(row)
+			}
+		}
+	}
+
+	// Use streaming driver if available
+	if sd, ok := driver.(StreamingDriver); ok {
+		columns, err := sd.QueryStream(sql, params, wrappedCB)
+		if err != nil {
+			// Remove stale connection so it reconnects next time
+			m.mu.Lock()
+			delete(m.drivers, dataSourceName)
+			m.mu.Unlock()
+			return nil, err
+		}
+		return columns, nil
+	}
+
+	// Fallback: use Query and iterate
+	columns, rows, err := driver.Query(sql, params)
+	if err != nil {
+		m.mu.Lock()
+		delete(m.drivers, dataSourceName)
+		m.mu.Unlock()
+		return nil, err
+	}
+
+	// Convert encoding if configured (for non-streaming path)
+	if ds != nil && ds.Config["encoding"] != "" {
+		rows, _ = convertEncoding(ds.Config["encoding"], rows)
+	}
+
+	for _, row := range rows {
+		if err := cb(row); err != nil {
+			return columns, err
+		}
+	}
+	return columns, nil
 }
 
 // Connected returns true if the named data source has an active connection.
