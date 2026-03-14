@@ -12,7 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const defaultBatchSize = 1000
+const defaultBatchSize = 999
 
 // QueryFunc executes a SQL query against a data source and returns columns + rows.
 type QueryFunc func(dataSource, sql string, params []interface{}) ([]string, [][]interface{}, error)

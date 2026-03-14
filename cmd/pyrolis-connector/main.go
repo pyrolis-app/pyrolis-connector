@@ -324,41 +324,18 @@ func handleQuery(r *relay.Relay, dbMgr *db.Manager, payload map[string]interface
 
 	slog.Info("Executing query", "request_id", requestID, "data_source", dsName)
 
-	// Stream rows in batches to avoid loading entire result set into memory
-	var columns []string
-	batch := make([][]interface{}, 0, relay.RowBatchSize)
-	totalRows := 0
-
-	flush := func(done bool) {
-		if len(batch) == 0 && !done {
-			return
-		}
-		r.StreamRowBatch(requestID, columns, batch, done)
-		totalRows += len(batch)
-		batch = make([][]interface{}, 0, relay.RowBatchSize)
-	}
-
-	cols, err := dbMgr.QueryStream(dsName, sqlStr, params, func(row []interface{}) error {
-		batch = append(batch, row)
-		if len(batch) >= relay.RowBatchSize {
-			flush(false)
-		}
-		return nil
-	})
+	columns, rows, err := dbMgr.Query(dsName, sqlStr, params)
 	if err != nil {
 		slog.Error("Query failed", "request_id", requestID, "error", err)
 		r.PushQueryError(requestID, err.Error())
 		return
 	}
-	columns = cols
 
-	// Flush remaining rows + done signal
-	flush(true)
-
-	slog.Info("Streamed rows", "request_id", requestID, "count", totalRows)
+	// StreamRows handles batching internally (RowBatchSize per batch)
+	r.StreamRows(requestID, columns, rows)
 
 	// Hint GC to release query memory promptly
-	if totalRows > 10000 {
+	if len(rows) > 10000 {
 		runtime.GC()
 	}
 }
